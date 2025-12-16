@@ -1,0 +1,13 @@
+{
+  "name": "extended-yolo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "sso": "aws sso login --sso-session=account"
+  },
+  "keywords": [],
+  "license": "ISC",
+  "packageManager": "pnpm@10.26.0"
+}

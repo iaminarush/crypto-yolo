@@ -1,0 +1,20 @@
+/// <reference path="./.sst/platform/config.d.ts" />
+
+export default $config({
+  app(input) {
+    return {
+      name: "extended-yolo",
+      home: "aws",
+      removal: input?.stage === "production" ? "retain" : "remove",
+      protect: ["production"].includes(input?.stage),
+      providers: {
+        aws: {
+          profile: "admin",
+        },
+      },
+    };
+  },
+  async run() {
+    new sst.Secret("ROBOTWEALTH_KEY");
+  },
+});
