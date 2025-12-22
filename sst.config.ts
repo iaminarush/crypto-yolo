@@ -15,9 +15,11 @@ export default $config({
     };
   },
   async run() {
-    new sst.Secret("ROBOTWEALTH_KEY");
+    const rwKey = new sst.Secret("ROBOTWEALTH_KEY");
+
     new sst.aws.Function("fetchRW", {
       handler: "src/trade.fetchWeights",
+      link: [rwKey],
     });
   },
 });
