@@ -9,5 +9,8 @@
   },
   "keywords": [],
   "license": "ISC",
-  "packageManager": "pnpm@10.26.0"
+  "packageManager": "pnpm@10.26.1",
+  "devDependencies": {
+    "sst": "^3.17.25"
+  }
 }
