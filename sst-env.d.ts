@@ -12,9 +12,11 @@ declare module "sst" {
     "fetchRW": {
       "name": string
       "type": "sst.aws.Function"
+      "url": string
     }
   }
 }
+/// <reference path="sst-env.d.ts" />
 
 import "sst"
 export {}

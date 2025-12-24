@@ -20,6 +20,9 @@ export default $config({
     new sst.aws.Function("fetchRW", {
       handler: "src/trade.fetchWeights",
       link: [rwKey],
+      url: {
+        authorization: "iam",
+      },
     });
   },
 });
