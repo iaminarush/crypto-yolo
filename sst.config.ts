@@ -21,7 +21,6 @@ export default $config({
       handler: "src/trade.fetchWeights",
       link: [rwKey],
       url: {
-        authorization: "none",
         cors: false,
       },
     });
