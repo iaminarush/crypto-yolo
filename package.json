@@ -9,11 +9,17 @@
   },
   "keywords": [],
   "license": "ISC",
-  "packageManager": "pnpm@10.26.2",
+  "packageManager": "pnpm@10.28.0",
   "devDependencies": {
     "@types/aws-lambda": "^8.10.159",
     "aws-lambda": "^1.0.7",
     "sst": "^3.17.25",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.90.1",
+    "ky": "^1.14.2",
+    "zod": "^4.3.5"
   }
 }
