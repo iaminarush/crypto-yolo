@@ -9,7 +9,11 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
-    "fetchRW": {
+    "SUPABASE_KEY": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "tradeYolo": {
       "name": string
       "type": "sst.aws.Function"
       "url": string

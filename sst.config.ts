@@ -17,9 +17,11 @@ export default $config({
   async run() {
     const rwKey = new sst.Secret("ROBOTWEALTH_KEY");
 
-    new sst.aws.Function("fetchRW", {
-      handler: "src/trade.fetchWeights",
-      link: [rwKey],
+    const supabaseKey = new sst.Secret("SUPABASE_KEY");
+
+    new sst.aws.Function("tradeYolo", {
+      handler: "src/trade.tradeYolo",
+      link: [rwKey, supabaseKey],
       url: {
         cors: false,
       },
