@@ -1,16 +1,16 @@
 import { Resource } from "sst";
 import { Handler } from "aws-lambda";
 import ky from "ky";
-import { EXTENDED_API } from "./constants";
+import { EXTENDED_API, ROBOTWEALTH_API } from "./constants";
 import { success, z } from "zod";
 import { createClient } from "@supabase/supabase-js";
+import { Database } from "../database.types.ts";
 
 export const tradeYolo: Handler = async () => {
-  const weights = await getWeights();
+  const config = await getConfig();
+  const volAndWeight = await getWeightsAndVolatilities(config);
 
-  await getTimestamp();
-
-  return weights;
+  return volAndWeight;
 };
 
 const Weight = z.object({
@@ -30,7 +30,7 @@ const WeightsResponse = z.object({
 
 export const getWeights = async () => {
   const rawData = await ky
-    .get("https://api.robotwealth.com/v1/yolo/weights", {
+    .get(`${ROBOTWEALTH_API}/weights`, {
       searchParams: { api_key: Resource.ROBOTWEALTH_KEY.value },
     })
     .json();
@@ -38,21 +38,81 @@ export const getWeights = async () => {
   const result = WeightsResponse.safeParse(rawData);
 
   if (!result.success) {
-    console.error("Invalid API response:", z.treeifyError(result.error));
-    return null;
+    throw new Error(`Invalid API Response: ${z.treeifyError(result.error)}`);
   }
 
   return result.data;
 };
 
+const VolSchema = z.object({
+  date: z.string(),
+  ewvol: z.number(),
+  ticker: z.string(),
+});
+
+const VolResponse = z.object({
+  data: z.array(VolSchema),
+  last_updated: z.number(),
+  success: z.boolean(),
+});
+
+export const getVolatilities = async () => {
+  const rawData = await ky
+    .get(`${ROBOTWEALTH_API}/volatilities`, {
+      searchParams: { api_key: Resource.ROBOTWEALTH_KEY.value },
+    })
+    .json();
+
+  const result = VolResponse.safeParse(rawData);
+
+  if (!result.success) {
+    throw new Error(`Invalid API Resposne: ${z.treeifyError(result.error)} `);
+  }
+
+  return result.data;
+};
+
+type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
+
+const getWeightsAndVolatilities = async (config: TConfig) => {
+  const weights = await getWeights();
+  const volatilities = await getVolatilities();
+
+  const merged = weights.data.map((w) => {
+    const vol = volatilities.data.find((v) => v.ticker === w.ticker);
+    if (!vol)
+      throw new Error("Non matching ticker between weights and volatilities");
+
+    return {
+      ...w,
+      ewvol: vol.ewvol,
+      combo_weight:
+        w.trend_megafactor * config.trend_weight +
+        w.momentum_megafactor * config.momentum_weight +
+        w.carry_megafactor * config.carry_weight,
+    };
+  });
+
+  return merged;
+};
+
 const supabaseUrl = "https://lapkwtulywsjfjogngcx.supabase.co";
 const supabaseKey = Resource.SUPABASE_KEY.value;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient<Database>(supabaseUrl, supabaseKey);
 
-export const getTimestamp = async () => {
-  const { data, error } = await supabase.from("timestamp").select("*");
+export const getConfig = async () => {
+  const { data, error } = await supabase
+    .from("exchange")
+    .select()
+    .eq("exchange", "extended")
+    .single();
 
-  console.log(data);
+  if (!data) throw new Error("No exchange config in DB");
+
+  if (data.carry_weight + data.momentum_weight + data.trend_weight !== 1)
+    throw new Error("Config weights does not add up to 1");
+
+  return data;
 };
 
 const getMarkets = async () => {
