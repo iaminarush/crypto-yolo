@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "sso": "aws sso login --sso-session=account"
+    "sso": "aws sso login --sso-session=account",
+    "genDBTypes": "pnpx supabase gen types typescript --project-id lapkwtulywsjfjogngcx --schema public > database.types.ts"
   },
   "keywords": [],
   "license": "ISC",
