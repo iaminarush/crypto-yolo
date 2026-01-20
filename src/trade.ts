@@ -77,15 +77,23 @@ type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
 const getWeightsAndVolatilities = async (config: TConfig) => {
   const weights = await getWeights();
   const volatilities = await getVolatilities();
+  let totalInverseVol = 0;
 
   const merged = weights.data.map((w) => {
     const vol = volatilities.data.find((v) => v.ticker === w.ticker);
     if (!vol)
       throw new Error("Non matching ticker between weights and volatilities");
 
+    if (vol.ewvol <= 0)
+      throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
+
+    const inverseVol = 1 / vol.ewvol;
+    totalInverseVol += inverseVol;
+
     return {
       ...w,
       ewvol: vol.ewvol,
+      inverseVol,
       combo_weight:
         w.trend_megafactor * config.trend_weight +
         w.momentum_megafactor * config.momentum_weight +
@@ -93,7 +101,12 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
     };
   });
 
-  return merged;
+  const calc = merged.map((m) => ({
+    ...m,
+    volScaledWeight: m.inverseVol * m.combo_weight,
+  }));
+
+  return calc;
 };
 
 const supabaseUrl = "https://lapkwtulywsjfjogngcx.supabase.co";
