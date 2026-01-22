@@ -5,6 +5,7 @@ import { EXTENDED_API, ROBOTWEALTH_API } from "./constants";
 import { success, z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { Database } from "../database.types.ts";
+import { clamp } from "./util.ts";
 
 export const tradeYolo: Handler = async () => {
   const config = await getConfig();
@@ -77,7 +78,7 @@ type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
 const getWeightsAndVolatilities = async (config: TConfig) => {
   const weights = await getWeights();
   const volatilities = await getVolatilities();
-  let totalInverseVol = 0;
+  let totalVol = 0;
 
   const merged = weights.data.map((w) => {
     const vol = volatilities.data.find((v) => v.ticker === w.ticker);
@@ -88,25 +89,30 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
       throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
 
     const inverseVol = 1 / vol.ewvol;
-    totalInverseVol += inverseVol;
+    const comboWeight =
+      w.trend_megafactor * config.trend_weight +
+      w.momentum_megafactor * config.momentum_weight +
+      w.carry_megafactor * config.carry_weight;
+
+    const volScaledWeight = clamp(inverseVol * comboWeight, -0.25, 0.25);
+
+    totalVol += Math.abs(volScaledWeight);
 
     return {
       ...w,
       ewvol: vol.ewvol,
       inverseVol,
-      combo_weight:
-        w.trend_megafactor * config.trend_weight +
-        w.momentum_megafactor * config.momentum_weight +
-        w.carry_megafactor * config.carry_weight,
+      combo_weight: comboWeight,
+      vol_scaled_weight: volScaledWeight,
     };
   });
 
-  const calc = merged.map((m) => ({
-    ...m,
-    volScaledWeight: m.inverseVol * m.combo_weight,
-  }));
-
-  return calc;
+  if (totalVol > 1)
+    return merged.map((m) => ({
+      ...m,
+      vol_scaled_weight: m.vol_scaled_weight / totalVol,
+    }));
+  else return merged;
 };
 
 const supabaseUrl = "https://lapkwtulywsjfjogngcx.supabase.co";
