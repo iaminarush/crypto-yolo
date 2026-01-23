@@ -5,6 +5,10 @@
 
 declare module "sst" {
   export interface Resource {
+    "EXTENDED_API_KEY": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "ROBOTWEALTH_KEY": {
       "type": "sst.sst.Secret"
       "value": string

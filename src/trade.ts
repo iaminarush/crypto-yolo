@@ -5,13 +5,15 @@ import { EXTENDED_API, ROBOTWEALTH_API } from "./constants";
 import { success, z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { Database } from "../database.types.ts";
-import { clamp } from "./util.ts";
+import { clamp, fetchAndParse } from "./util.ts";
 
 export const tradeYolo: Handler = async () => {
   const config = await getConfig();
   const volAndWeight = await getWeightsAndVolatilities(config);
+  const markets = await getMarkets();
+  const positions = await getPositions();
 
-  return volAndWeight;
+  return markets;
 };
 
 const Weight = z.object({
@@ -23,55 +25,47 @@ const Weight = z.object({
   trend_megafactor: z.number(),
 });
 
-const WeightsResponse = z.object({
+const WeightsSchema = z.object({
   success: z.boolean(),
   last_updated: z.number(),
   data: z.array(Weight),
 });
 
-export const getWeights = async () => {
-  const rawData = await ky
-    .get(`${ROBOTWEALTH_API}/weights`, {
-      searchParams: { api_key: Resource.ROBOTWEALTH_KEY.value },
-    })
-    .json();
-
-  const result = WeightsResponse.safeParse(rawData);
-
-  if (!result.success) {
-    throw new Error(`Invalid API Response: ${z.treeifyError(result.error)}`);
-  }
-
-  return result.data;
-};
+const getWeights = async () =>
+  fetchAndParse(
+    () =>
+      ky
+        .get(`${ROBOTWEALTH_API}/weights`, {
+          searchParams: {
+            api_key: Resource.ROBOTWEALTH_KEY.value,
+          },
+        })
+        .json(),
+    WeightsSchema,
+  );
 
 const VolSchema = z.object({
-  date: z.string(),
-  ewvol: z.number(),
-  ticker: z.string(),
-});
-
-const VolResponse = z.object({
-  data: z.array(VolSchema),
+  data: z.array(
+    z.object({
+      date: z.string(),
+      ewvol: z.number(),
+      ticker: z.string(),
+    }),
+  ),
   last_updated: z.number(),
   success: z.boolean(),
 });
 
-export const getVolatilities = async () => {
-  const rawData = await ky
-    .get(`${ROBOTWEALTH_API}/volatilities`, {
-      searchParams: { api_key: Resource.ROBOTWEALTH_KEY.value },
-    })
-    .json();
-
-  const result = VolResponse.safeParse(rawData);
-
-  if (!result.success) {
-    throw new Error(`Invalid API Resposne: ${z.treeifyError(result.error)} `);
-  }
-
-  return result.data;
-};
+const getVolatilities = async () =>
+  fetchAndParse(
+    () =>
+      ky
+        .get(`${ROBOTWEALTH_API}/volatilities`, {
+          searchParams: { api_key: Resource.ROBOTWEALTH_KEY.value },
+        })
+        .json(),
+    VolSchema,
+  );
 
 type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
 
@@ -111,8 +105,13 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
     return merged.map((m) => ({
       ...m,
       vol_scaled_weight: m.vol_scaled_weight / totalVol,
+      dollar_allocation: (m.vol_scaled_weight / totalVol) * config.allocation,
     }));
-  else return merged;
+  else
+    return merged.map((m) => ({
+      ...m,
+      dollar_allocation: m.vol_scaled_weight * config.allocation,
+    }));
 };
 
 const supabaseUrl = "https://lapkwtulywsjfjogngcx.supabase.co";
@@ -134,8 +133,35 @@ export const getConfig = async () => {
   return data;
 };
 
-const getMarkets = async () => {
-  const data = await ky.get(`${EXTENDED_API}/api/v1/info/markets`).json();
+const MarketSchema = z.object({
+  data: z.array(
+    z.object({
+      name: z.string(),
+      tradingConfig: z.object({
+        minOrderSize: z.number(),
+      }),
+    }),
+  ),
+});
 
-  return data;
+const getMarkets = async () =>
+  fetchAndParse(
+    () => ky.get(`${EXTENDED_API}/v1/info/markets`).json(),
+    MarketSchema,
+  );
+
+const privateExtended = ky.create({
+  headers: {
+    "X-Api-Key": Resource.EXTENDED_API_KEY.value,
+  },
+  prefixUrl: `${EXTENDED_API}/`,
+});
+
+const getPositions = async () => {
+  try {
+    const data = await privateExtended.get("v1/user/positions").json();
+    return data;
+  } catch (e) {
+    console.error(e);
+  }
 };
