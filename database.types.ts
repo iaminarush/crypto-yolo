@@ -43,19 +43,19 @@ export type Database = {
       }
       ticker: {
         Row: {
-          extended_ticker: string | null
+          extended_ticker: string
           id: number
-          rbw_ticker: string | null
+          rbw_ticker: string
         }
         Insert: {
-          extended_ticker?: string | null
+          extended_ticker: string
           id?: number
-          rbw_ticker?: string | null
+          rbw_ticker?: string
         }
         Update: {
-          extended_ticker?: string | null
+          extended_ticker?: string
           id?: number
-          rbw_ticker?: string | null
+          rbw_ticker?: string
         }
         Relationships: []
       }
