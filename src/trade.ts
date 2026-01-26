@@ -12,8 +12,6 @@ export const tradeYolo: Handler = async () => {
   const config = await getConfig();
   const volAndWeight = await getWeightsAndVolatilities(config);
   const tickers = await getTickers();
-  const markets = await getMarkets();
-  const positions = await getPositions();
 
   return volAndWeight;
 };
@@ -158,37 +156,4 @@ export const getTickers = async () => {
   if (!data) throw new Error("No exchange config in DB");
 
   return data;
-};
-
-const MarketSchema = z.object({
-  data: z.array(
-    z.object({
-      name: z.string(),
-      tradingConfig: z.object({
-        minOrderSize: z.coerce.number(),
-      }),
-    }),
-  ),
-});
-
-const getMarkets = async () =>
-  fetchAndParse(
-    () => ky.get(`${EXTENDED_API}/v1/info/markets`).json(),
-    MarketSchema,
-  );
-
-const privateExtended = ky.create({
-  headers: {
-    "X-Api-Key": Resource.EXTENDED_API_KEY.value,
-  },
-  prefixUrl: `${EXTENDED_API}/`,
-});
-
-const getPositions = async () => {
-  try {
-    const data = await privateExtended.get("v1/user/positions").json();
-    return data;
-  } catch (e) {
-    console.error(e);
-  }
 };
