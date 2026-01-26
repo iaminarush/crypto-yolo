@@ -6,14 +6,16 @@ import { success, z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { Database } from "../database.types.ts";
 import { clamp, fetchAndParse } from "./util.ts";
+import Decimal from "decimal.js";
 
 export const tradeYolo: Handler = async () => {
   const config = await getConfig();
   const volAndWeight = await getWeightsAndVolatilities(config);
+  const tickers = await getTickers();
   const markets = await getMarkets();
   const positions = await getPositions();
 
-  return markets;
+  return volAndWeight;
 };
 
 const Weight = z.object({
@@ -72,7 +74,7 @@ type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
 const getWeightsAndVolatilities = async (config: TConfig) => {
   const weights = await getWeights();
   const volatilities = await getVolatilities();
-  let totalVol = 0;
+  let totalVol = new Decimal(0);
 
   const merged = weights.data.map((w) => {
     const vol = volatilities.data.find((v) => v.ticker === w.ticker);
@@ -82,15 +84,19 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
     if (vol.ewvol <= 0)
       throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
 
-    const inverseVol = 1 / vol.ewvol;
-    const comboWeight =
-      w.trend_megafactor * config.trend_weight +
-      w.momentum_megafactor * config.momentum_weight +
-      w.carry_megafactor * config.carry_weight;
+    const inverseVol = new Decimal(1).dividedBy(vol.ewvol);
+    const comboWeight = new Decimal(w.trend_megafactor)
+      .times(config.trend_weight)
+      .plus(new Decimal(w.momentum_megafactor).times(config.momentum_weight))
+      .plus(new Decimal(w.carry_megafactor).times(config.carry_weight));
 
-    const volScaledWeight = clamp(inverseVol * comboWeight, -0.25, 0.25);
+    const volScaledWeight = clamp(
+      new Decimal(inverseVol).times(comboWeight).toNumber(),
+      -0.25,
+      0.25,
+    );
 
-    totalVol += Math.abs(volScaledWeight);
+    totalVol = totalVol.plus(Math.abs(volScaledWeight));
 
     return {
       ...w,
@@ -101,17 +107,30 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
     };
   });
 
-  if (totalVol > 1)
-    return merged.map((m) => ({
-      ...m,
-      vol_scaled_weight: m.vol_scaled_weight / totalVol,
-      dollar_allocation: (m.vol_scaled_weight / totalVol) * config.allocation,
-    }));
+  if (totalVol.greaterThan(1))
+    return merged.map((m) => {
+      const volScaledWeight = new Decimal(m.vol_scaled_weight).dividedBy(
+        totalVol,
+      );
+      const dollarAllocation = volScaledWeight.times(config.allocation);
+
+      return {
+        ...m,
+        vol_scaled_weight: volScaledWeight.toNumber(),
+        dollar_allocation: dollarAllocation.toNumber(),
+        token_allocation: dollarAllocation.dividedBy(m.arrival_price),
+      };
+    });
   else
-    return merged.map((m) => ({
-      ...m,
-      dollar_allocation: m.vol_scaled_weight * config.allocation,
-    }));
+    return merged.map((m) => {
+      const dollarAllocation = new Decimal(m.vol_scaled_weight).times(
+        config.allocation,
+      );
+      return {
+        ...m,
+        dollar_allocation: dollarAllocation,
+      };
+    });
 };
 
 const supabaseUrl = "https://lapkwtulywsjfjogngcx.supabase.co";
@@ -133,12 +152,20 @@ export const getConfig = async () => {
   return data;
 };
 
+export const getTickers = async () => {
+  const { data, error } = await supabase.from("ticker").select();
+
+  if (!data) throw new Error("No exchange config in DB");
+
+  return data;
+};
+
 const MarketSchema = z.object({
   data: z.array(
     z.object({
       name: z.string(),
       tradingConfig: z.object({
-        minOrderSize: z.number(),
+        minOrderSize: z.coerce.number(),
       }),
     }),
   ),
