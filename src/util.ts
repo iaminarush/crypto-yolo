@@ -12,7 +12,7 @@ export const fetchAndParse = async <T>(
 
     const result = schema.safeParse(rawData);
     if (!result.success) {
-      throw new Error(`Invalid API Response: ${z.treeifyError(result.error)}`);
+      throw new Error(`Invalid API Response: ${z.prettifyError(result.error)}`);
     }
     return result.data;
   } catch (error) {
