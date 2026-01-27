@@ -6,7 +6,7 @@ import { success, z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { Database } from "../database.types.ts";
 import { clamp, fetchAndParse } from "./util.ts";
-import Decimal from "decimal.js";
+import BigNumber from "bignumber.js";
 
 export const tradeYolo: Handler = async () => {
   const config = await getConfig();
@@ -72,7 +72,7 @@ type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
 const getWeightsAndVolatilities = async (config: TConfig) => {
   const weights = await getWeights();
   const volatilities = await getVolatilities();
-  let totalVol = new Decimal(0);
+  let totalVol = new BigNumber(0);
 
   const merged = weights.data.map((w) => {
     const vol = volatilities.data.find((v) => v.ticker === w.ticker);
@@ -82,14 +82,14 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
     if (vol.ewvol <= 0)
       throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
 
-    const inverseVol = new Decimal(1).dividedBy(vol.ewvol);
-    const comboWeight = new Decimal(w.trend_megafactor)
+    const inverseVol = new BigNumber(1).div(vol.ewvol);
+    const comboWeight = new BigNumber(w.trend_megafactor)
       .times(config.trend_weight)
-      .plus(new Decimal(w.momentum_megafactor).times(config.momentum_weight))
-      .plus(new Decimal(w.carry_megafactor).times(config.carry_weight));
+      .plus(new BigNumber(w.momentum_megafactor).times(config.momentum_weight))
+      .plus(new BigNumber(w.carry_megafactor).times(config.carry_weight));
 
     const volScaledWeight = clamp(
-      new Decimal(inverseVol).times(comboWeight).toNumber(),
+      inverseVol.times(comboWeight).toNumber(),
       -0.25,
       0.25,
     );
@@ -105,23 +105,21 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
     };
   });
 
-  if (totalVol.greaterThan(1))
+  if (totalVol.gt(1))
     return merged.map((m) => {
-      const volScaledWeight = new Decimal(m.vol_scaled_weight).dividedBy(
-        totalVol,
-      );
+      const volScaledWeight = new BigNumber(m.vol_scaled_weight).div(totalVol);
       const dollarAllocation = volScaledWeight.times(config.allocation);
 
       return {
         ...m,
         vol_scaled_weight: volScaledWeight.toNumber(),
         dollar_allocation: dollarAllocation.toNumber(),
-        token_allocation: dollarAllocation.dividedBy(m.arrival_price),
+        token_allocation: dollarAllocation.div(m.arrival_price),
       };
     });
   else
     return merged.map((m) => {
-      const dollarAllocation = new Decimal(m.vol_scaled_weight).times(
+      const dollarAllocation = new BigNumber(m.vol_scaled_weight).times(
         config.allocation,
       );
       return {
