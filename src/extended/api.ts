@@ -1,8 +1,13 @@
 import ky from "ky";
-import { EXTENDED_API } from "./constants";
-import { fetchAndParse } from "./util.ts";
+import { EXTENDED_API } from "@/constants";
+import { fetchAndParse, generateNonce } from "@/util";
+import { addHours } from "date-fns";
 import { z } from "zod";
 import { Resource } from "sst";
+import BigNumber from "bignumber.js";
+import { signMessage } from "./signing";
+
+const VAULT_ID = 110816;
 
 const publicExtended = ky.create({
   prefixUrl: `${EXTENDED_API}/`,
@@ -36,6 +41,46 @@ export const getOrderbook = async (ticker: string) =>
     OrderbookSchema,
   );
 
+export const MarketConfigSchema = z.object({
+  data: z.array(
+    z.object({
+      name: z.string(),
+      tradingConfig: z.object({
+        minOrderSize: z.string(),
+        minOrderSizeChange: z.string(),
+        minPriceChange: z.string(),
+        maxMarketOrderValue: z.string(),
+        maxLimitOrderValue: z.string(),
+        maxPositionValue: z.string(),
+        maxLeverage: z.string(),
+        maxNumOrders: z.string(),
+        limitPriceCap: z.string(),
+        limitPriceFloor: z.string(),
+      }),
+      l2Config: z.object({
+        type: z.string(),
+        collateralId: z.string(),
+        collateralResolution: z.number(),
+        syntheticId: z.string(),
+        syntheticResolution: z.number(),
+      }),
+    }),
+  ),
+});
+
+export type MarketConfig = z.infer<typeof MarketConfigSchema>;
+
+export const getMarketConfig = async (ticker: string) =>
+  fetchAndParse(
+    () =>
+      publicExtended
+        .get("v1/info/markets", {
+          searchParams: { market: ticker },
+        })
+        .json(),
+    MarketConfigSchema,
+  );
+
 export const CreateOrderResponseSchema = z.object({
   data: z.object({
     id: z.number(),
@@ -50,27 +95,39 @@ export type CreateOrderResponse = z.infer<typeof CreateOrderResponseSchema>;
 export const createOrder = async (
   ticker: string,
   side: "buy" | "sell",
-  size: string,
+  qty: string,
   price: string,
   id: string,
-) =>
-  fetchAndParse(
+) => {
+  const nonce = generateNonce();
+  const expiryEpochMillis = addHours(new Date(), 1).getTime();
+  return fetchAndParse(
     () =>
       privateExtended
         .post("v1/order", {
           json: {
-            market: ticker,
-            side,
-            size,
-            price,
-            type: "limit",
-            postOnly: true,
             id,
+            market: ticker,
+            type: "limit",
+            side,
+            qty,
+            price,
+            postOnly: true,
+            timeInForce: "GTT",
+            expiryEpochMillis,
+            fee: "0",
+            nonce,
+            settlement: {
+              signature: "",
+              starkKey: Resource.EXTENDED_STARKEX_KEY.value,
+              collateralPosition: new BigNumber(VAULT_ID).toString(10),
+            },
           },
         })
         .json(),
     CreateOrderResponseSchema,
   );
+};
 
 export const OrderSchema = z.object({
   data: z.object({
