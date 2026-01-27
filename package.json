@@ -21,8 +21,11 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
-    "decimal.js": "^10.6.0",
+    "@x10xchange/stark-crypto-wrapper-wasm": "^0.2.0",
+    "bignumber.js": "^9.3.1",
+    "date-fns": "^4.1.0",
     "ky": "^1.14.2",
+    "starknet": "^9.2.1",
     "zod": "^4.3.5"
   }
 }
