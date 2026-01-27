@@ -9,6 +9,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "EXTENDED_STARKEX_KEY": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "ROBOTWEALTH_KEY": {
       "type": "sst.sst.Secret"
       "value": string

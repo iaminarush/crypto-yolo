@@ -21,9 +21,11 @@ export default $config({
 
     const extendedApiKey = new sst.Secret("EXTENDED_API_KEY");
 
+    const extendedStarkexKey = new sst.Secret("EXTENDED_STARKEX_KEY");
+
     new sst.aws.Function("tradeYolo", {
       handler: "src/trade.tradeYolo",
-      link: [rwKey, supabaseKey, extendedApiKey],
+      link: [rwKey, supabaseKey, extendedApiKey, extendedStarkexKey],
       url: {
         cors: false,
       },
