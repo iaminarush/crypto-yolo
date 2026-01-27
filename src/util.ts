@@ -20,3 +20,11 @@ export const fetchAndParse = async <T>(
     throw error;
   }
 };
+
+export const getRandomInt = (min: number, max: number) => {
+  return Math.floor(Math.random() * (max - min)) + min;
+};
+
+export const generateNonce = () => {
+  return getRandomInt(0, 2 ** 31 - 1).toString();
+};
