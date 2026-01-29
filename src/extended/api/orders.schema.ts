@@ -46,7 +46,7 @@ const OrderTpSlTriggerSchema = z.object({
   starkExSignature: z.string().optional(),
 })
 
-const UserOrderSchema = z.object({
+export const UserOrderSchema = z.object({
   id: zodLong(),
   accountId: zodLong(),
   externalId: z.string(),
@@ -74,4 +74,5 @@ const UserOrderSchema = z.object({
 })
 
 export const PlacedOrderResponseSchema = z.object({ data: PlacedOrderSchema })
+export const UserOrderResponseSchema = z.object({ data: UserOrderSchema })
 export const UserOrdersResponseSchema = z.object({ data: UserOrderSchema.array() })
