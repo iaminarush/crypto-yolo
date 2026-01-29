@@ -26,6 +26,7 @@ export default $config({
     new sst.aws.Function("tradeYolo", {
       handler: "src/trade.tradeYolo",
       link: [rwKey, supabaseKey, extendedApiKey, extendedStarkexKey],
+      timeout: "15 minutes",
       url: {
         cors: false,
       },
