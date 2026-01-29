@@ -9,7 +9,7 @@ import { createOrderContext } from "./utils/create-order-context";
 import { Decimal } from "./utils/number";
 import { roundToMinChange } from "./utils/round-to-min-change";
 
-export const createLimitOrder = async ({ ticker, side, orderSize, cancelId }: { ticker: string; side: OrderSide; orderSize: Decimal; cancelId?: string }) => {
+export const createLimitOrder = async ({ ticker, side, orderSize, cancelId }: { ticker: string; side: OrderSide; orderSize: Decimal; cancelId?: string }): Promise<{ id: string }> => {
   const { starkPrivateKey, vaultId } = await init();
 
   const market = await getMarket(ticker);
@@ -53,4 +53,6 @@ export const createLimitOrder = async ({ ticker, side, orderSize, cancelId }: { 
   });
 
   const result = await placeOrder({ order });
+
+  return { id: result.id.toString() };
 };
