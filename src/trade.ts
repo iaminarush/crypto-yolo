@@ -6,12 +6,13 @@ import { Resource } from "sst";
 import { z } from "zod";
 import { Database } from "../database.types.ts";
 import { ROBOTWEALTH_API } from "./constants";
+import { cancelOrder } from "./extended/api/cancel-order";
 import { getOrderbook } from "./extended/api/orderbook";
 import { getOrder } from "./extended/api/orders";
 import { getPositions, type Position } from "./extended/api/positions";
 import { createLimitOrder } from "./extended/create-limit-order";
 import { init } from "./extended/init";
-import { OrderSide } from "./extended/models/order.types.ts";
+import { type OrderSide } from "./extended/models/order.types.ts";
 import { Decimal } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
 
@@ -49,22 +50,32 @@ export const tradeYolo: Handler = async () => {
   for (const diff of orderDiffs) {
     if (diff.size.lte(0)) continue;
 
-    const orderbook = await getOrderbook(diff.extendedTicker);
-    const price = diff.side === "BUY" ? orderbook.bid[0].price : orderbook.ask[0].price;
+    try {
+      const orderbook = await getOrderbook(diff.extendedTicker);
+      const price = diff.side === "BUY" ? orderbook.bid[0].price : orderbook.ask[0].price;
 
-    const result = await createLimitOrder({
-      ticker: diff.extendedTicker,
-      side: diff.side,
-      orderSize: Decimal(diff.size),
-    });
+      const orderResult = await createLimitOrder({
+        ticker: diff.extendedTicker,
+        side: diff.side,
+        orderSize: Decimal(diff.size),
+      });
 
-    pendingOrders.set(result.id, {
-      orderId: result.id,
-      ticker: diff.extendedTicker,
-      side: diff.side,
-      size: diff.size,
-      price: price as unknown as BigNumber,
-    });
+      if (orderResult.status === "error") {
+        console.error(`Order failed for ${diff.extendedTicker}:`, (orderResult as { error: string }).error);
+        continue;
+      }
+
+      const successResult = orderResult as { status: "success"; id: string };
+      pendingOrders.set(successResult.id, {
+        orderId: successResult.id,
+        ticker: diff.extendedTicker,
+        side: diff.side,
+        size: diff.size,
+        price: price as unknown as BigNumber,
+      });
+    } catch {
+      continue;
+    }
   }
 
   while (Date.now() - startTime < MAX_RUNTIME_MS && pendingOrders.size > 0) {
@@ -90,8 +101,11 @@ export const tradeYolo: Handler = async () => {
             cancelId: orderId,
           });
 
-          order.orderId = result.id;
-          order.price = bestPrice;
+          if (result.status === "success") {
+            const successResult = result as { status: "success"; id: string };
+            order.orderId = successResult.id;
+            order.price = bestPrice;
+          }
         }
       } catch {
         continue;
@@ -103,6 +117,14 @@ export const tradeYolo: Handler = async () => {
   }
 
   const remainingOrders = Array.from(pendingOrders.values());
+
+  for (const order of remainingOrders) {
+    try {
+      await cancelOrder(order.orderId);
+    } catch {
+      continue;
+    }
+  }
 
   return {
     success: pendingOrders.size === 0,
