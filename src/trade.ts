@@ -37,6 +37,7 @@ export const tradeYolo: Handler = async () => {
   await init();
   const startTime = Date.now();
 
+  //TODO: Add trade buffer
   const config = await getConfig();
   const volAndWeight = await getWeightsAndVolatilities(config);
   const tickers = await getTickers();
@@ -44,6 +45,7 @@ export const tradeYolo: Handler = async () => {
 
   const desiredPositions = mapVolAndWeightToDesiredPositions(volAndWeight, tickers);
   const orderDiffs = calculateOrderDiffs(desiredPositions, currentPositions);
+
 
   const pendingOrders = new Map<string, PendingOrder>();
 
