@@ -20,7 +20,7 @@ const PositionSchema = z.object({
   tpLimitPrice: zodDecimal().optional(),
   slTriggerPrice: zodDecimal().optional(),
   slLimitPrice: zodDecimal().optional(),
-  adl: zodDecimal().optional(),
+  adl: z.union([zodDecimal(), z.number()]).optional(),
   maxPositionSize: zodDecimal().optional(),
   createdTime: z.number(),
   updatedTime: z.number(),
@@ -38,5 +38,17 @@ export const getPositions = async (params?: { markets?: string[]; side?: "LONG" 
     },
   });
 
-  return PositionsResponseSchema.parse(data).data;
+
+  try {
+    return PositionsResponseSchema.parse(data).data;
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      console.error("Zod parse error in getPositions:");
+      console.error(error.message);
+      console.error("Formatted errors:", z.formatError(error, (issue) => issue.message));
+    } else {
+      console.error("Unexpected error in getPositions:", error);
+    }
+    throw error;
+  }
 };
