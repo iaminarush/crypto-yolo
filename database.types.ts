@@ -21,6 +21,7 @@ export type Database = {
           exchange: string
           id: number
           momentum_weight: number
+          trade_buffer: number
           trend_weight: number
         }
         Insert: {
@@ -29,6 +30,7 @@ export type Database = {
           exchange: string
           id?: number
           momentum_weight?: number
+          trade_buffer?: number
           trend_weight?: number
         }
         Update: {
@@ -37,6 +39,7 @@ export type Database = {
           exchange?: string
           id?: number
           momentum_weight?: number
+          trade_buffer?: number
           trend_weight?: number
         }
         Relationships: []
