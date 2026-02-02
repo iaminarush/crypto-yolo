@@ -22,8 +22,8 @@ const PositionSchema = z.object({
   slLimitPrice: zodDecimal().optional(),
   adl: z.union([zodDecimal(), z.number()]).optional(),
   maxPositionSize: zodDecimal().optional(),
-  createdTime: z.number(),
-  updatedTime: z.number(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
 });
 
 export const PositionsResponseSchema = z.object({ data: PositionSchema.array() });
