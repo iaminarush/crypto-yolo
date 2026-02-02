@@ -43,9 +43,10 @@ export const tradeYolo: Handler = async () => {
   const tickers = await getTickers();
   const currentPositions = await getPositions();
 
-  const desiredPositions = mapVolAndWeightToDesiredPositions(volAndWeight, tickers);
+  const desiredPositions = mapVolAndWeightToDesiredPositions(volAndWeight, tickers, config);
   const orderDiffs = calculateOrderDiffs(desiredPositions, currentPositions);
 
+  return desiredPositions
 
   const pendingOrders = new Map<string, PendingOrder>();
 
@@ -144,6 +145,7 @@ export const tradeYolo: Handler = async () => {
 const mapVolAndWeightToDesiredPositions = (
   volAndWeight: Awaited<ReturnType<typeof getWeightsAndVolatilities>>,
   tickers: Awaited<ReturnType<typeof getTickers>>,
+  config: Database['public']['Tables']['exchange']['Row']
 ) => {
   const tickerMap = new Map(tickers.map((t) => [t.rbw_ticker, t.extended_ticker]));
 
@@ -157,6 +159,7 @@ const mapVolAndWeightToDesiredPositions = (
       rwTicker: vw.ticker,
       extendedTicker,
       desiredSize: tokenAllocation,
+      upperBound: tokenAllocation.times(Decimal(config.trade_buffer).plus(1))
     };
   });
 };
