@@ -43,10 +43,14 @@ export const tradeYolo: Handler = async () => {
   const tickers = await getTickers();
   const currentPositions = await getPositions();
 
-  const desiredPositions = mapVolAndWeightToDesiredPositions(volAndWeight, tickers, config);
+  const desiredPositions = mapVolAndWeightToDesiredPositions(
+    volAndWeight,
+    tickers,
+    config,
+  );
   const orderDiffs = calculateOrderDiffs(desiredPositions, currentPositions);
 
-  return desiredPositions
+  return desiredPositions;
 
   const pendingOrders = new Map<string, PendingOrder>();
 
@@ -55,7 +59,8 @@ export const tradeYolo: Handler = async () => {
 
     try {
       const orderbook = await getOrderbook(diff.extendedTicker);
-      const price = diff.side === "BUY" ? orderbook.bid[0].price : orderbook.ask[0].price;
+      const price =
+        diff.side === "BUY" ? orderbook.bid[0].price : orderbook.ask[0].price;
 
       const orderResult = await createLimitOrder({
         ticker: diff.extendedTicker,
@@ -64,7 +69,10 @@ export const tradeYolo: Handler = async () => {
       });
 
       if (orderResult.status === "error") {
-        console.error(`Order failed for ${diff.extendedTicker}:`, (orderResult as { error: string }).error);
+        console.error(
+          `Order failed for ${diff.extendedTicker}:`,
+          (orderResult as { error: string }).error,
+        );
         continue;
       }
 
@@ -92,9 +100,10 @@ export const tradeYolo: Handler = async () => {
         }
 
         const orderbook = await getOrderbook(order.ticker);
-        const bestPrice = order.side === "BUY"
-          ? (orderbook.bid[0].price as unknown as BigNumber)
-          : (orderbook.ask[0].price as unknown as BigNumber);
+        const bestPrice =
+          order.side === "BUY"
+            ? (orderbook.bid[0].price as unknown as BigNumber)
+            : (orderbook.ask[0].price as unknown as BigNumber);
 
         if (!order.price.eq(bestPrice)) {
           const result = await createLimitOrder({
@@ -145,21 +154,27 @@ export const tradeYolo: Handler = async () => {
 const mapVolAndWeightToDesiredPositions = (
   volAndWeight: Awaited<ReturnType<typeof getWeightsAndVolatilities>>,
   tickers: Awaited<ReturnType<typeof getTickers>>,
-  config: Database['public']['Tables']['exchange']['Row']
+  config: Database["public"]["Tables"]["exchange"]["Row"],
 ) => {
-  const tickerMap = new Map(tickers.map((t) => [t.rbw_ticker, t.extended_ticker]));
+  const tickerMap = new Map(
+    tickers.map((t) => [t.rbw_ticker, t.extended_ticker]),
+  );
 
   return volAndWeight.map((vw) => {
     const extendedTicker = tickerMap.get(vw.ticker);
     if (!extendedTicker) throw new Error(`No extended ticker for ${vw.ticker}`);
 
-    const tokenAllocation = "token_allocation" in vw ? (vw.token_allocation as unknown as BigNumber) : new BigNumber(0);
+    const tokenAllocation =
+      "token_allocation" in vw
+        ? (vw.token_allocation as unknown as BigNumber)
+        : new BigNumber(0);
 
     return {
       rwTicker: vw.ticker,
       extendedTicker,
       desiredSize: tokenAllocation,
-      upperBound: tokenAllocation.times(Decimal(config.trade_buffer).plus(1))
+      upperBound: tokenAllocation.times(Decimal(config.trade_buffer).plus(1)),
+      lowerBound: tokenAllocation.times(Decimal(-config.trade_buffer).plus(1)),
     };
   });
 };
@@ -169,7 +184,10 @@ const calculateOrderDiffs = (
   currentPositions: Position[],
 ): OrderDiff[] => {
   const positionMap = new Map(
-    currentPositions.map((p) => [p.market, { side: p.side, size: new BigNumber(p.size.toString()) }]),
+    currentPositions.map((p) => [
+      p.market,
+      { side: p.side, size: new BigNumber(p.size.toString()) },
+    ]),
   );
 
   return desiredPositions.map((dp) => {
