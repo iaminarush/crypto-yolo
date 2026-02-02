@@ -197,6 +197,7 @@ const calculateOrderDiffs = (
 
     let diff: { side: OrderSide; size: BigNumber };
 
+    //TODO: Check logic
     if (!currentSide) {
       if (dp.desiredSize.gt(0)) {
         diff = { side: "BUY", size: dp.desiredSize };
