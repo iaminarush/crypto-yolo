@@ -26,11 +26,16 @@ const PositionSchema = z.object({
   updatedAt: z.number(),
 });
 
-export const PositionsResponseSchema = z.object({ data: PositionSchema.array() });
+export const PositionsResponseSchema = z.object({
+  data: PositionSchema.array(),
+});
 
 export type Position = z.infer<typeof PositionSchema>;
 
-export const getPositions = async (params?: { markets?: string[]; side?: "LONG" | "SHORT" }) => {
+export const getPositions = async (params?: {
+  markets?: string[];
+  side?: "LONG" | "SHORT";
+}) => {
   const { data } = await axiosClient.get<unknown>("/api/v1/user/positions", {
     params: {
       market: params?.markets,
@@ -38,14 +43,16 @@ export const getPositions = async (params?: { markets?: string[]; side?: "LONG" 
     },
   });
 
-
   try {
     return PositionsResponseSchema.parse(data).data;
   } catch (error) {
     if (error instanceof z.ZodError) {
       console.error("Zod parse error in getPositions:");
       console.error(error.message);
-      console.error("Formatted errors:", z.formatError(error, (issue) => issue.message));
+      console.error(
+        "Formatted errors:",
+        z.formatError(error, (issue) => issue.message),
+      );
     } else {
       console.error("Unexpected error in getPositions:", error);
     }
