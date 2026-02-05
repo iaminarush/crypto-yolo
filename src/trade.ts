@@ -13,7 +13,7 @@ import { getPositions, type Position } from "./extended/api/positions";
 import { createLimitOrder } from "./extended/create-limit-order";
 import { init } from "./extended/init";
 import { type OrderSide } from "./extended/models/order.types.ts";
-import { Decimal } from "./extended/utils/number";
+import { Decimal, Long } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
 
 const SLEEP_MS = 1000;
@@ -304,13 +304,11 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
       .plus(new BigNumber(w.momentum_megafactor).times(config.momentum_weight))
       .plus(new BigNumber(w.carry_megafactor).times(config.carry_weight));
 
-    const volScaledWeight = clamp(
-      inverseVol.times(comboWeight).toNumber(),
-      -0.25,
-      0.25,
+    const volScaledWeight = Long(
+      clamp(inverseVol.times(comboWeight).toNumber(), -0.25, 0.25),
     );
 
-    totalVol = totalVol.plus(Math.abs(volScaledWeight));
+    totalVol = totalVol.plus(Math.abs(volScaledWeight.toNumber()));
 
     return {
       ...w,
@@ -328,8 +326,8 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
 
       return {
         ...m,
-        vol_scaled_weight: volScaledWeight.toNumber(),
-        dollar_allocation: dollarAllocation.toNumber(),
+        vol_scaled_weight: volScaledWeight,
+        dollar_allocation: dollarAllocation,
         token_allocation: dollarAllocation.div(m.arrival_price),
       };
     });
@@ -341,6 +339,7 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
       return {
         ...m,
         dollar_allocation: dollarAllocation,
+        token_allocation: dollarAllocation.div(m.arrival_price),
       };
     });
 };
