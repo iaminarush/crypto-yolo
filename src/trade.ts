@@ -211,16 +211,18 @@ const calculateOrderSize = (
           if (!currentPosition.size.gte(desiredPosition.lowerBound)) {
             diff = {
               side: "BUY",
-              size: desiredPosition.lowerBound
+              size: currentPosition.size
                 .absoluteValue()
-                .minus(currentPosition.size.absoluteValue()),
+                .minus(desiredPosition.lowerBound.absoluteValue())
+                .absoluteValue(),
             };
           } else {
             diff = {
               side: "SELL",
-              size: desiredPosition.upperBound
+              size: currentPosition.size
                 .absoluteValue()
-                .minus(currentPosition.size.absoluteValue()),
+                .minus(desiredPosition.upperBound.absoluteValue())
+                .absoluteValue(),
             };
           }
 
