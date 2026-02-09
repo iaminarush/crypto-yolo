@@ -48,9 +48,9 @@ export const tradeYolo: Handler = async () => {
     tickers,
     config,
   );
-  const orderDiffs = calculateOrderDiffs(desiredPositions, currentPositions);
+  const orderDiffs = calculateOrderSize(desiredPositions, currentPositions);
 
-  return desiredPositions;
+  return orderDiffs;
 
   const pendingOrders = new Map<string, PendingOrder>();
 
@@ -73,6 +73,11 @@ export const tradeYolo: Handler = async () => {
           `Order failed for ${diff.extendedTicker}:`,
           (orderResult as { error: string }).error,
         );
+        continue;
+      }
+
+      if (orderResult.status === "skipped") {
+        console.log("Order skipped for order size < minOrderSize");
         continue;
       }
 
@@ -179,57 +184,68 @@ const mapVolAndWeightToDesiredPositions = (
   });
 };
 
-const calculateOrderDiffs = (
+const calculateOrderSize = (
   desiredPositions: ReturnType<typeof mapVolAndWeightToDesiredPositions>,
   currentPositions: Position[],
-): OrderDiff[] => {
-  const positionMap = new Map(
-    currentPositions.map((p) => [
-      p.market,
-      { side: p.side, size: new BigNumber(p.size.toString()) },
-    ]),
+) => {
+  const formattedCurrentPositions = currentPositions.map((cp) => ({
+    ...cp,
+    size: cp.side === "LONG" ? cp.size : cp.size.multipliedBy(-1),
+  }));
+
+  const orderSizes = desiredPositions.reduce(
+    (acc: OrderDiff[], desiredPosition, index) => {
+      const currentPosition = formattedCurrentPositions.find(
+        (cp) => cp.market === desiredPosition.extendedTicker,
+      );
+
+      let diff: { side: OrderSide; size: BigNumber };
+
+      if (currentPosition) {
+        if (
+          !(
+            currentPosition.size.gte(desiredPosition.lowerBound) &&
+            currentPosition.size.lte(desiredPosition.upperBound)
+          )
+        ) {
+          if (!currentPosition.size.gte(desiredPosition.lowerBound)) {
+            diff = {
+              side: "BUY",
+              size: desiredPosition.lowerBound
+                .absoluteValue()
+                .minus(currentPosition.size.absoluteValue()),
+            };
+          } else {
+            diff = {
+              side: "SELL",
+              size: desiredPosition.upperBound
+                .absoluteValue()
+                .minus(currentPosition.size.absoluteValue()),
+            };
+          }
+
+          acc.push({
+            extendedTicker: desiredPosition.extendedTicker,
+            side: diff.side,
+            size: diff.size,
+          });
+        }
+      } else {
+        if (!desiredPosition.desiredSize.isEqualTo(0)) {
+          acc.push({
+            extendedTicker: desiredPosition.extendedTicker,
+            side: desiredPosition.desiredSize.gt(0) ? "BUY" : "SELL",
+            size: desiredPosition.desiredSize.absoluteValue(),
+          });
+        }
+      }
+
+      return acc;
+    },
+    [],
   );
 
-  return desiredPositions.map((dp) => {
-    const current = positionMap.get(dp.extendedTicker);
-    const currentSize = current?.size || new BigNumber(0);
-    const currentSide = current?.side;
-
-    let diff: { side: OrderSide; size: BigNumber };
-
-    //TODO: Check logic
-    if (!currentSide) {
-      if (dp.desiredSize.gt(0)) {
-        diff = { side: "BUY", size: dp.desiredSize };
-      } else if (dp.desiredSize.lt(0)) {
-        diff = { side: "SELL", size: dp.desiredSize.abs() };
-      } else {
-        diff = { side: "BUY", size: new BigNumber(0) };
-      }
-    } else if (currentSide === "LONG") {
-      if (dp.desiredSize.gt(currentSize)) {
-        diff = { side: "BUY", size: dp.desiredSize.minus(currentSize) };
-      } else if (dp.desiredSize.lt(currentSize)) {
-        diff = { side: "SELL", size: currentSize.minus(dp.desiredSize) };
-      } else {
-        diff = { side: "BUY", size: new BigNumber(0) };
-      }
-    } else {
-      if (dp.desiredSize.abs().gt(currentSize)) {
-        diff = { side: "SELL", size: dp.desiredSize.abs().minus(currentSize) };
-      } else if (dp.desiredSize.abs().lt(currentSize)) {
-        diff = { side: "BUY", size: currentSize.minus(dp.desiredSize.abs()) };
-      } else {
-        diff = { side: "BUY", size: new BigNumber(0) };
-      }
-    }
-
-    return {
-      extendedTicker: dp.extendedTicker,
-      side: diff.side,
-      size: diff.size,
-    };
-  });
+  return orderSizes;
 };
 
 const Weight = z.object({

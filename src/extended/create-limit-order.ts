@@ -13,49 +13,58 @@ import { roundToMinChange } from "./utils/round-to-min-change";
 const MIN_RETRY_DELAY_MS = 100;
 const MAX_RETRY_DELAY_MS = 200;
 
-const getRandomDelay = () => 
-  Math.floor(Math.random() * (MAX_RETRY_DELAY_MS - MIN_RETRY_DELAY_MS + 1)) + MIN_RETRY_DELAY_MS;
+const getRandomDelay = () =>
+  Math.floor(Math.random() * (MAX_RETRY_DELAY_MS - MIN_RETRY_DELAY_MS + 1)) +
+  MIN_RETRY_DELAY_MS;
 
 export type CreateOrderResult =
   | { status: "success"; id: string }
+  | { status: "skipped"; reason: "below_min_order_size" }
   | { status: "error"; error: unknown };
 
 const isPriceInvalidError = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null) return false;
-  
-  const err = error as { 
-    data?: { 
-      status?: string; 
-      error?: { code?: number; message?: string } 
-    } 
+
+  const err = error as {
+    data?: {
+      status?: string;
+      error?: { code?: number; message?: string };
+    };
   };
-  return (
-    err.data?.status === "ERROR" &&
-    err.data?.error?.code === 1141
-  );
+  return err.data?.status === "ERROR" && err.data?.error?.code === 1141;
 };
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export const createLimitOrder = async ({ ticker, side, orderSize, cancelId }: { ticker: string; side: OrderSide; orderSize: Decimal; cancelId?: string }): Promise<CreateOrderResult> => {
+export const createLimitOrder = async ({
+  ticker,
+  side,
+  orderSize,
+  cancelId,
+}: {
+  ticker: string;
+  side: OrderSide;
+  orderSize: Decimal;
+  cancelId?: string;
+}): Promise<CreateOrderResult> => {
   const { starkPrivateKey, vaultId } = await init();
 
   const market = await getMarket(ticker);
+
+  if (orderSize.lt(market.tradingConfig.minOrderSize)) {
+    return { status: "skipped", reason: "below_min_order_size" };
+  }
+
   const fees = await getFees({ marketName: ticker });
   const starknetDomain = await getStarknetDomain();
-
-  const finalSize = orderSize.gt(market.tradingConfig.minOrderSize)
-    ? orderSize
-    : market.tradingConfig.minOrderSize;
 
   let retryCount = 0;
 
   while (true) {
     try {
       const orderbook = await getOrderbook(ticker);
-      const orderPrice = side === "BUY"
-        ? orderbook.bid[0].price
-        : orderbook.ask[0].price;
+      const orderPrice =
+        side === "BUY" ? orderbook.bid[0].price : orderbook.ask[0].price;
 
       const ctx = createOrderContext({
         market,
@@ -70,7 +79,7 @@ export const createLimitOrder = async ({ ticker, side, orderSize, cancelId }: { 
         orderType: "LIMIT",
         side,
         amountOfSynthetic: roundToMinChange(
-          finalSize,
+          orderSize,
           market.tradingConfig.minOrderSizeChange,
           Decimal.ROUND_DOWN,
         ),
@@ -89,14 +98,18 @@ export const createLimitOrder = async ({ ticker, side, orderSize, cancelId }: { 
       const result = await placeOrder({ order });
 
       if (retryCount > 0) {
-        console.log(`Order for ${ticker} succeeded after ${retryCount} retries`);
+        console.log(
+          `Order for ${ticker} succeeded after ${retryCount} retries`,
+        );
       }
 
       return { status: "success", id: result.id.toString() };
     } catch (error) {
       if (isPriceInvalidError(error)) {
         retryCount++;
-        console.warn(`Price invalid for ${ticker}, retrying (attempt ${retryCount})...`);
+        console.warn(
+          `Price invalid for ${ticker}, retrying (attempt ${retryCount})...`,
+        );
         await sleep(getRandomDelay());
         continue;
       }
