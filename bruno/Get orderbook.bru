@@ -1,0 +1,20 @@
+meta {
+  name: Get orderbook
+  type: http
+  seq: 6
+}
+
+get {
+  url: https://api.starknet.extended.exchange/api/v1/info/markets/:market/orderbook
+  body: none
+  auth: inherit
+}
+
+params:path {
+  market: BTC-USD
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

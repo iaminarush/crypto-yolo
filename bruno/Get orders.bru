@@ -1,0 +1,16 @@
+meta {
+  name: Get orders
+  type: http
+  seq: 3
+}
+
+get {
+  url: https://api.starknet.extended.exchange/api/v1/user/orders
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

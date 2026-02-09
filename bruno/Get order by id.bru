@@ -1,0 +1,20 @@
+meta {
+  name: Get order by id
+  type: http
+  seq: 4
+}
+
+get {
+  url: https://api.starknet.extended.exchange/api/v1/user/orders/:id
+  body: none
+  auth: inherit
+}
+
+params:path {
+  id: 2017057298132779008
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,20 @@
+meta {
+  name: Get markets
+  type: http
+  seq: 1
+}
+
+get {
+  url: https://api.starknet.extended.exchange/api/v1/info/markets?market=LINK-USD
+  body: none
+  auth: inherit
+}
+
+params:query {
+  market: LINK-USD
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
