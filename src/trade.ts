@@ -15,6 +15,8 @@ import { init } from "./extended/init";
 import { type OrderSide } from "./extended/models/order.types.ts";
 import { Decimal, Long } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
+import { getMarket } from "./extended/api/markets.ts";
+import { Market } from "./extended/api/markets.schema.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 15 * 60 * 1000;
@@ -37,62 +39,28 @@ export const tradeYolo: Handler = async () => {
   await init();
   const startTime = Date.now();
 
-  //TODO: Add trade buffer
   const config = await getConfig();
   const volAndWeight = await getWeightsAndVolatilities(config);
   const tickers = await getTickers();
   const currentPositions = await getPositions();
+  const rawMarkets = await getMarket();
+  const markets = rawMarkets.filter((m) => m.status === "ACTIVE");
 
   const desiredPositions = mapVolAndWeightToDesiredPositions(
     volAndWeight,
     tickers,
     config,
+    markets,
   );
-  const orderDiffs = calculateOrderSize(desiredPositions, currentPositions);
 
-  return orderDiffs;
+  const tickersToRebalance = filterTickersToRebalance(
+    desiredPositions,
+    currentPositions,
+  );
 
   const pendingOrders = new Map<string, PendingOrder>();
 
-  for (const diff of orderDiffs) {
-    if (diff.size.lte(0)) continue;
-
-    try {
-      const orderbook = await getOrderbook(diff.extendedTicker);
-      const price =
-        diff.side === "BUY" ? orderbook.bid[0].price : orderbook.ask[0].price;
-
-      const orderResult = await createLimitOrder({
-        ticker: diff.extendedTicker,
-        side: diff.side,
-        orderSize: Decimal(diff.size),
-      });
-
-      if (orderResult.status === "error") {
-        console.error(
-          `Order failed for ${diff.extendedTicker}:`,
-          (orderResult as { error: string }).error,
-        );
-        continue;
-      }
-
-      if (orderResult.status === "skipped") {
-        console.log("Order skipped for order size < minOrderSize");
-        continue;
-      }
-
-      const successResult = orderResult as { status: "success"; id: string };
-      pendingOrders.set(successResult.id, {
-        orderId: successResult.id,
-        ticker: diff.extendedTicker,
-        side: diff.side,
-        size: diff.size,
-        price: price as unknown as BigNumber,
-      });
-    } catch {
-      continue;
-    }
-  }
+  return desiredPositions;
 
   while (Date.now() - startTime < MAX_RUNTIME_MS && pendingOrders.size > 0) {
     for (const [orderId, order] of pendingOrders) {
@@ -160,9 +128,12 @@ const mapVolAndWeightToDesiredPositions = (
   volAndWeight: Awaited<ReturnType<typeof getWeightsAndVolatilities>>,
   tickers: Awaited<ReturnType<typeof getTickers>>,
   config: Database["public"]["Tables"]["exchange"]["Row"],
+  markets: Market[],
 ) => {
   const tickerMap = new Map(
-    tickers.map((t) => [t.rbw_ticker, t.extended_ticker]),
+    tickers
+      .filter((t) => markets.some((m) => m.name === t.extended_ticker))
+      .map((t) => [t.rbw_ticker, t.extended_ticker]),
   );
 
   return volAndWeight.map((vw) => {
@@ -180,6 +151,9 @@ const mapVolAndWeightToDesiredPositions = (
       desiredSize: tokenAllocation,
       upperBound: tokenAllocation.times(Decimal(config.trade_buffer).plus(1)),
       lowerBound: tokenAllocation.times(Decimal(-config.trade_buffer).plus(1)),
+      minOrdersize:
+        markets.find((m) => m.name === extendedTicker)?.tradingConfig
+          .minOrderSize ?? BigNumber(0),
     };
   });
 };
@@ -248,6 +222,30 @@ const calculateOrderSize = (
   );
 
   return orderSizes;
+};
+
+const filterTickersToRebalance = (
+  desiredPositions: ReturnType<typeof mapVolAndWeightToDesiredPositions>,
+  currentPositions: Position[],
+) => {
+  const positionMap = new Map(
+    currentPositions.map((p) => [
+      p.market,
+      p.side === "LONG" ? p.size : p.size.multipliedBy(-1),
+    ]),
+  );
+
+  return desiredPositions.filter((dp) => {
+    const currentSize = positionMap.get(dp.extendedTicker);
+
+    if (currentSize === undefined) return true;
+
+    if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
+      return false;
+    }
+
+    return true;
+  });
 };
 
 const Weight = z.object({
