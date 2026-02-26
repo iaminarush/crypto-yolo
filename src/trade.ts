@@ -60,6 +60,19 @@ export const tradeYolo: Handler = async () => {
 
   const pendingOrders = new Map<string, PendingOrder>();
 
+  while (
+    Date.now() - startTime < MAX_RUNTIME_MS &&
+    tickersToRebalance.size > 0
+  ) {
+    for (const [ticker, desiredPosition] of tickersToRebalance) {
+      // TODO: implement logic
+      // If no order for said ticker, calc orderSize using currentPosition and desiredPosition
+      // If exisitng order, use qty - filledQty as size
+    }
+
+    break;
+  }
+
   return desiredPositions;
 
   while (Date.now() - startTime < MAX_RUNTIME_MS && pendingOrders.size > 0) {
@@ -235,17 +248,24 @@ const filterTickersToRebalance = (
     ]),
   );
 
-  return desiredPositions.filter((dp) => {
+  const result = new Map<string, (typeof desiredPositions)[0]>();
+
+  for (const dp of desiredPositions) {
     const currentSize = positionMap.get(dp.extendedTicker);
 
-    if (currentSize === undefined) return true;
-
-    if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
-      return false;
+    if (currentSize === undefined) {
+      result.set(dp.extendedTicker, dp);
+      continue;
     }
 
-    return true;
-  });
+    if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
+      continue;
+    }
+
+    result.set(dp.extendedTicker, dp);
+  }
+
+  return result;
 };
 
 const Weight = z.object({
