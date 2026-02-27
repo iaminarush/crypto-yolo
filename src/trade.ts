@@ -8,32 +8,18 @@ import { Database } from "../database.types.ts";
 import { ROBOTWEALTH_API } from "./constants";
 import { cancelOrder } from "./extended/api/cancel-order";
 import { getOrderbook } from "./extended/api/orderbook";
-import { getOrder } from "./extended/api/orders";
+import { getOrder, getOrders } from "./extended/api/orders";
 import { getPositions, type Position } from "./extended/api/positions";
 import { createLimitOrder } from "./extended/create-limit-order";
 import { init } from "./extended/init";
 import { type OrderSide } from "./extended/models/order.types.ts";
 import { Decimal, Long } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
-import { getMarket } from "./extended/api/markets.ts";
+import { getMarkets } from "./extended/api/markets.ts";
 import { Market } from "./extended/api/markets.schema.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 15 * 60 * 1000;
-
-interface PendingOrder {
-  orderId: string;
-  ticker: string;
-  side: OrderSide;
-  size: BigNumber;
-  price: BigNumber;
-}
-
-interface OrderDiff {
-  extendedTicker: string;
-  side: OrderSide;
-  size: BigNumber;
-}
 
 export const tradeYolo: Handler = async () => {
   await init();
@@ -43,10 +29,10 @@ export const tradeYolo: Handler = async () => {
   const volAndWeight = await getWeightsAndVolatilities(config);
   const tickers = await getTickers();
   const currentPositions = await getPositions();
-  const rawMarkets = await getMarket();
+  const rawMarkets = await getMarkets();
   const markets = rawMarkets.filter((m) => m.status === "ACTIVE");
 
-  const desiredPositions = mapVolAndWeightToDesiredPositions(
+  const desiredPositions = calculateDesiredPositions(
     volAndWeight,
     tickers,
     config,
@@ -58,86 +44,42 @@ export const tradeYolo: Handler = async () => {
     currentPositions,
   );
 
-  const pendingOrders = new Map<string, PendingOrder>();
+  let isContinue = true;
 
   while (
     Date.now() - startTime < MAX_RUNTIME_MS &&
-    tickersToRebalance.size > 0
+    tickersToRebalance.size > 0 &&
+    isContinue
   ) {
     for (const [ticker, desiredPosition] of tickersToRebalance) {
       // TODO: implement logic
       // If no order for said ticker, calc orderSize using currentPosition and desiredPosition
       // If exisitng order, use qty - filledQty as size
-    }
 
-    break;
-  }
-
-  return desiredPositions;
-
-  while (Date.now() - startTime < MAX_RUNTIME_MS && pendingOrders.size > 0) {
-    for (const [orderId, order] of pendingOrders) {
-      try {
-        const status = await getOrder(orderId);
-
-        if (status.status === "FILLED" || status.status === "CANCELLED") {
-          pendingOrders.delete(orderId);
-          continue;
-        }
-
-        const orderbook = await getOrderbook(order.ticker);
-        const bestPrice =
-          order.side === "BUY"
-            ? (orderbook.bid[0].price as unknown as BigNumber)
-            : (orderbook.ask[0].price as unknown as BigNumber);
-
-        if (!order.price.eq(bestPrice)) {
-          const result = await createLimitOrder({
-            ticker: order.ticker,
-            side: order.side,
-            orderSize: Decimal(order.size),
-            cancelId: orderId,
-          });
-
-          if (result.status === "success") {
-            const successResult = result as { status: "success"; id: string };
-            order.orderId = successResult.id;
-            order.price = bestPrice;
-          }
-        }
-      } catch {
-        continue;
+      const order = await getOrders({ marketsNames: [ticker] });
+      if (order.length === 0) {
+        const currentPosition = currentPositions.find(
+          (p) => p.market === ticker,
+        );
+        const orderSize = calculateOrderSize(
+          desiredPosition,
+          currentPosition
+            ? currentPosition.size.times(
+                currentPosition.side === "LONG" ? 1 : -1,
+              )
+            : BigNumber(0),
+        );
       }
     }
 
-    if (pendingOrders.size === 0) break;
     await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
+    isContinue = false;
   }
 
-  const remainingOrders = Array.from(pendingOrders.values());
-
-  for (const order of remainingOrders) {
-    try {
-      await cancelOrder(order.orderId);
-    } catch {
-      continue;
-    }
-  }
-
-  return {
-    success: pendingOrders.size === 0,
-    runtimeMs: Date.now() - startTime,
-    pendingOrders: remainingOrders.length,
-    orders: remainingOrders.map((o) => ({
-      orderId: o.orderId,
-      ticker: o.ticker,
-      side: o.side,
-      size: o.size.toString(),
-    })),
-  };
+  return;
 };
 
-const mapVolAndWeightToDesiredPositions = (
+const calculateDesiredPositions = (
   volAndWeight: Awaited<ReturnType<typeof getWeightsAndVolatilities>>,
   tickers: Awaited<ReturnType<typeof getTickers>>,
   config: Database["public"]["Tables"]["exchange"]["Row"],
@@ -171,74 +113,37 @@ const mapVolAndWeightToDesiredPositions = (
   });
 };
 
+type TDesiredPosition = ReturnType<typeof calculateDesiredPositions>[number];
+
 const calculateOrderSize = (
-  desiredPositions: ReturnType<typeof mapVolAndWeightToDesiredPositions>,
-  currentPositions: Position[],
-) => {
-  const formattedCurrentPositions = currentPositions.map((cp) => ({
-    ...cp,
-    size: cp.side === "LONG" ? cp.size : cp.size.multipliedBy(-1),
-  }));
+  desiredPosition: TDesiredPosition,
+  currentPosition: BigNumber,
+): { size: BigNumber; side: "BUY" | "SELL" } => {
+  if (
+    currentPosition.gte(desiredPosition.lowerBound) &&
+    currentPosition.lte(desiredPosition.upperBound)
+  ) {
+    return { size: BigNumber(0), side: "BUY" };
+  }
 
-  const orderSizes = desiredPositions.reduce(
-    (acc: OrderDiff[], desiredPosition, index) => {
-      const currentPosition = formattedCurrentPositions.find(
-        (cp) => cp.market === desiredPosition.extendedTicker,
-      );
+  if (currentPosition.lte(desiredPosition.lowerBound)) {
+    const gap = desiredPosition.lowerBound.minus(currentPosition);
+    let size = gap.lt(desiredPosition.minOrdersize)
+      ? desiredPosition.minOrdersize
+      : gap;
 
-      let diff: { side: OrderSide; size: BigNumber };
+    if (currentPosition.plus(size).gt(desiredPosition.upperBound)) {
+      size = BigNumber(0);
+    }
 
-      if (currentPosition) {
-        if (
-          !(
-            currentPosition.size.gte(desiredPosition.lowerBound) &&
-            currentPosition.size.lte(desiredPosition.upperBound)
-          )
-        ) {
-          if (!currentPosition.size.gte(desiredPosition.lowerBound)) {
-            diff = {
-              side: "BUY",
-              size: currentPosition.size
-                .absoluteValue()
-                .minus(desiredPosition.lowerBound.absoluteValue())
-                .absoluteValue(),
-            };
-          } else {
-            diff = {
-              side: "SELL",
-              size: currentPosition.size
-                .absoluteValue()
-                .minus(desiredPosition.upperBound.absoluteValue())
-                .absoluteValue(),
-            };
-          }
+    return { size, side: "BUY" };
+  }
 
-          acc.push({
-            extendedTicker: desiredPosition.extendedTicker,
-            side: diff.side,
-            size: diff.size,
-          });
-        }
-      } else {
-        if (!desiredPosition.desiredSize.isEqualTo(0)) {
-          acc.push({
-            extendedTicker: desiredPosition.extendedTicker,
-            side: desiredPosition.desiredSize.gt(0) ? "BUY" : "SELL",
-            size: desiredPosition.desiredSize.absoluteValue(),
-          });
-        }
-      }
-
-      return acc;
-    },
-    [],
-  );
-
-  return orderSizes;
+  return { size: BigNumber(0), side: "BUY" };
 };
 
 const filterTickersToRebalance = (
-  desiredPositions: ReturnType<typeof mapVolAndWeightToDesiredPositions>,
+  desiredPositions: TDesiredPosition[],
   currentPositions: Position[],
 ) => {
   const positionMap = new Map(
@@ -248,7 +153,7 @@ const filterTickersToRebalance = (
     ]),
   );
 
-  const result = new Map<string, (typeof desiredPositions)[0]>();
+  const result = new Map<string, TDesiredPosition>();
 
   for (const dp of desiredPositions) {
     const currentSize = positionMap.get(dp.extendedTicker);
