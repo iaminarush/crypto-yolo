@@ -47,8 +47,8 @@ export const tradeYolo: Handler = async () => {
 
   while (
     Date.now() - startTime < MAX_RUNTIME_MS &&
-    tickersToRebalance.size > 0 &&
-    isContinue
+    tickersToRebalance.size > 0
+    // && isContinue
   ) {
     for (const [ticker, desiredPosition] of tickersToRebalance) {
       // TODO: implement logic
@@ -72,8 +72,8 @@ export const tradeYolo: Handler = async () => {
         if (size.gt(0)) {
           const limitOrder = await createLimitOrder({
             ticker,
-            orderSize: size,
-            side: side,
+            size,
+            side,
           });
 
           if (limitOrder.status === "skipped") {
@@ -82,8 +82,8 @@ export const tradeYolo: Handler = async () => {
         } else {
           tickersToRebalance.delete(ticker);
         }
-      } else //TODO: Verify llm output
-      {
+      } //TODO: Verify llm output
+      else {
         const existingOrder = order[0];
 
         if (existingOrder.status === "FILLED") {
@@ -102,18 +102,27 @@ export const tradeYolo: Handler = async () => {
             : orderbook.ask[0].price;
 
         if (existingOrder.price && !existingOrder.price.eq(bestPrice)) {
-          const cancelResposne = await cancelOrder(existingOrder.id.toString());
+          await cancelOrder(existingOrder.id.toString());
 
-          const remainingSize = existingOrder.qty.minus(
-            existingOrder.filledQty ?? BigNumber(0),
+          const currentPositions = await getPositions({ markets: [ticker] });
+          const currentPosition = currentPositions[0];
+
+          const { size, side } = calculateOrderSize(
+            desiredPosition,
+            currentPosition
+              ? currentPosition.size.times(
+                  currentPosition.side === "LONG" ? 1 : -1,
+                )
+              : BigNumber(0),
           );
-          const result = await createLimitOrder({
-            ticker,
-            side: existingOrder.side,
-            orderSize: remainingSize,
-          });
 
-          if (result.status === "skipped") {
+          if (size.gt(0)) {
+            const limitOrder = await createLimitOrder({
+              ticker,
+              size,
+              side,
+            });
+          } else {
             tickersToRebalance.delete(ticker);
           }
         }
@@ -121,7 +130,7 @@ export const tradeYolo: Handler = async () => {
     }
 
     await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
-    isContinue = false;
+    // isContinue = false;
   }
 
   return;
