@@ -6,17 +6,16 @@ import { Resource } from "sst";
 import { z } from "zod";
 import { Database } from "../database.types.ts";
 import { ROBOTWEALTH_API } from "./constants";
-import { cancelOrder } from "./extended/api/cancel-order";
+import { Market } from "./extended/api/markets.schema.ts";
+import { getMarkets } from "./extended/api/markets.ts";
+import { getOrders } from "./extended/api/orders";
 import { getOrderbook } from "./extended/api/orderbook";
-import { getOrder, getOrders } from "./extended/api/orders";
+import { cancelOrder } from "./extended/api/cancel-order";
 import { getPositions, type Position } from "./extended/api/positions";
-import { createLimitOrder } from "./extended/create-limit-order";
 import { init } from "./extended/init";
-import { type OrderSide } from "./extended/models/order.types.ts";
 import { Decimal, Long } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
-import { getMarkets } from "./extended/api/markets.ts";
-import { Market } from "./extended/api/markets.schema.ts";
+import { createLimitOrder } from "./extended/create-limit-order.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 15 * 60 * 1000;
@@ -61,7 +60,7 @@ export const tradeYolo: Handler = async () => {
         const currentPosition = currentPositions.find(
           (p) => p.market === ticker,
         );
-        const orderSize = calculateOrderSize(
+        const { size, side } = calculateOrderSize(
           desiredPosition,
           currentPosition
             ? currentPosition.size.times(
@@ -69,6 +68,55 @@ export const tradeYolo: Handler = async () => {
               )
             : BigNumber(0),
         );
+
+        if (size.gt(0)) {
+          const limitOrder = await createLimitOrder({
+            ticker,
+            orderSize: size,
+            side: side,
+          });
+
+          if (limitOrder.status === "skipped") {
+            tickersToRebalance.delete(ticker);
+          }
+        } else {
+          tickersToRebalance.delete(ticker);
+        }
+      } else //TODO: Verify llm output
+      {
+        const existingOrder = order[0];
+
+        if (existingOrder.status === "FILLED") {
+          tickersToRebalance.delete(ticker);
+          continue;
+        }
+
+        if (existingOrder.status === "CANCELLED") {
+          continue;
+        }
+
+        const orderbook = await getOrderbook(ticker);
+        const bestPrice =
+          existingOrder.side === "BUY"
+            ? orderbook.bid[0].price
+            : orderbook.ask[0].price;
+
+        if (existingOrder.price && !existingOrder.price.eq(bestPrice)) {
+          const cancelResposne = await cancelOrder(existingOrder.id.toString());
+
+          const remainingSize = existingOrder.qty.minus(
+            existingOrder.filledQty ?? BigNumber(0),
+          );
+          const result = await createLimitOrder({
+            ticker,
+            side: existingOrder.side,
+            orderSize: remainingSize,
+          });
+
+          if (result.status === "skipped") {
+            tickersToRebalance.delete(ticker);
+          }
+        }
       }
     }
 
@@ -126,7 +174,7 @@ const calculateOrderSize = (
     return { size: BigNumber(0), side: "BUY" };
   }
 
-  if (currentPosition.lte(desiredPosition.lowerBound)) {
+  if (currentPosition.lt(desiredPosition.lowerBound)) {
     const gap = desiredPosition.lowerBound.minus(currentPosition);
     let size = gap.lt(desiredPosition.minOrdersize)
       ? desiredPosition.minOrdersize
@@ -137,6 +185,21 @@ const calculateOrderSize = (
     }
 
     return { size, side: "BUY" };
+  }
+
+  if (currentPosition.gt(desiredPosition.upperBound)) {
+    const gap = desiredPosition.upperBound
+      .minus(currentPosition)
+      .absoluteValue();
+    let size = gap.lt(desiredPosition.minOrdersize)
+      ? desiredPosition.minOrdersize
+      : gap;
+
+    if (currentPosition.minus(size).lt(desiredPosition.lowerBound)) {
+      size = BigNumber(0);
+    }
+
+    return { size, side: "SELL" };
   }
 
   return { size: BigNumber(0), side: "BUY" };
