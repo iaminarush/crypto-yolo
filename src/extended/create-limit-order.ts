@@ -39,19 +39,19 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export const createLimitOrder = async ({
   ticker,
   side,
-  orderSize,
+  size,
   cancelId,
 }: {
   ticker: string;
+  size: Decimal;
   side: OrderSide;
-  orderSize: Decimal;
   cancelId?: string;
 }): Promise<CreateOrderResult> => {
   const { starkPrivateKey, vaultId } = await init();
 
   const market = await getMarket(ticker);
 
-  if (orderSize.lt(market.tradingConfig.minOrderSize)) {
+  if (size.lt(market.tradingConfig.minOrderSize)) {
     return { status: "skipped", reason: "below_min_order_size" };
   }
 
@@ -79,7 +79,7 @@ export const createLimitOrder = async ({
         orderType: "LIMIT",
         side,
         amountOfSynthetic: roundToMinChange(
-          orderSize,
+          size,
           market.tradingConfig.minOrderSizeChange,
           Decimal.ROUND_DOWN,
         ),
