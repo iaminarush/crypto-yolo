@@ -1,0 +1,20 @@
+meta {
+  name: Delete order by id
+  type: http
+  seq: 8
+}
+
+delete {
+  url: https://api.starknet.extended.exchange/api/v1/user/order/:id
+  body: none
+  auth: inherit
+}
+
+params:path {
+  id: 2017057298132779008
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,15 @@
+meta {
+  name: Get orders history
+  type: http
+  seq: 7
+}
+
+get {
+  url: https://api.starknet.extended.exchange/api/v1/user/orders/history
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+}
