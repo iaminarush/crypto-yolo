@@ -21,6 +21,7 @@ export type Database = {
           exchange: string
           id: number
           momentum_weight: number
+          timestamp: number | null
           trade_buffer: number
           trend_weight: number
         }
@@ -30,6 +31,7 @@ export type Database = {
           exchange: string
           id?: number
           momentum_weight?: number
+          timestamp?: number | null
           trade_buffer?: number
           trend_weight?: number
         }
@@ -39,6 +41,7 @@ export type Database = {
           exchange?: string
           id?: number
           momentum_weight?: number
+          timestamp?: number | null
           trade_buffer?: number
           trend_weight?: number
         }
