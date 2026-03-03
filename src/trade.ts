@@ -17,7 +17,7 @@ import { Decimal, Long } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
 import { createLimitOrder } from "./extended/create-limit-order.ts";
 
-const SLEEP_MS = 15000;
+const SLEEP_MS = 5000;
 const MAX_RUNTIME_MS = 15 * 60 * 1000;
 
 export const tradeYolo: Handler = async () => {
