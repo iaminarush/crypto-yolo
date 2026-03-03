@@ -43,14 +43,9 @@ export const tradeYolo: Handler = async () => {
     currentPositions,
   );
 
-  return Array.from(tickersToRebalance.values());
-
-  let isContinue = true;
-
   while (
     Date.now() - startTime < MAX_RUNTIME_MS &&
     tickersToRebalance.size > 0
-    // isContinue
   ) {
     for (const [ticker, desiredPosition] of tickersToRebalance) {
       const order = await getOrders({ marketsNames: [ticker] });
@@ -134,8 +129,6 @@ export const tradeYolo: Handler = async () => {
       }
     }
 
-    isContinue = false;
-
     await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
   }
 
@@ -146,7 +139,7 @@ export const tradeYolo: Handler = async () => {
     finalPositions,
   );
 
-  return {
+  const result: TradeResult = {
     success: finalTickersToRebalance.size === 0,
     timedOut: Date.now() - startTime >= MAX_RUNTIME_MS,
     runtimeMs: Date.now() - startTime,
@@ -159,6 +152,10 @@ export const tradeYolo: Handler = async () => {
       value: p.value.toString(),
     })),
   };
+
+  await sendTelegramMessage(result);
+
+  return result;
 };
 
 const calculateDesiredPositions = (
@@ -182,12 +179,22 @@ const calculateDesiredPositions = (
         ? (vw.token_allocation as unknown as BigNumber)
         : new BigNumber(0);
 
+    const isPositive = tokenAllocation.gte(0);
+
     return {
       rwTicker: vw.ticker,
       extendedTicker,
       desiredSize: tokenAllocation,
-      upperBound: tokenAllocation.times(Decimal(config.trade_buffer).plus(1)),
-      lowerBound: tokenAllocation.times(Decimal(-config.trade_buffer).plus(1)),
+      upperBound: tokenAllocation.times(
+        Decimal(isPositive ? config.trade_buffer : -config.trade_buffer).plus(
+          1,
+        ),
+      ),
+      lowerBound: tokenAllocation.times(
+        Decimal(isPositive ? -config.trade_buffer : config.trade_buffer).plus(
+          1,
+        ),
+      ),
       minOrdersize:
         markets.find((m) => m.name === extendedTicker)?.tradingConfig
           .minOrderSize ?? BigNumber(0),
@@ -407,4 +414,43 @@ export const getTickers = async () => {
   if (!data) throw new Error("No exchange config in DB");
 
   return data;
+};
+
+type TradeResult = {
+  success: boolean;
+  timedOut: boolean;
+  runtimeMs: number;
+  initialTickersToRebalance: number;
+  remainingTickers: string[];
+  positions: { market: string; side: string; size: string; value: string }[];
+};
+
+const sendTelegramMessage = async (result: TradeResult) => {
+  const runtimeSec = Math.floor(result.runtimeMs / 1000);
+  const minutes = Math.floor(runtimeSec / 60);
+  const seconds = runtimeSec % 60;
+
+  const status = result.success ? "Success" : "Failed";
+  const timeout = result.timedOut ? " (timed out)" : "";
+  const remainingList = result.remainingTickers.length > 0
+    ? result.remainingTickers.join(", ")
+    : "None";
+
+  const message = `Trading Complete!
+
+${status}${timeout}
+Runtime: ${minutes}m ${seconds}s
+Initial tickers: ${result.initialTickersToRebalance}
+Remaining: ${remainingList}`;
+
+  await ky.post(
+    `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
+    {
+      json: {
+        chat_id: Resource.TELEGRAM_ID.value,
+        text: message,
+        parse_mode: "HTML",
+      },
+    },
+  );
 };
