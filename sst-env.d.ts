@@ -13,6 +13,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "FailureTopic": {
+      "arn": string
+      "type": "sst.aws.SnsTopic"
+    }
     "ROBOTWEALTH_KEY": {
       "type": "sst.sst.Secret"
       "value": string
@@ -21,10 +25,26 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "TELEGRAM_ID": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "TELEGRAM_TOKEN": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "notifier": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "tradeYolo": {
       "name": string
       "type": "sst.aws.Function"
       "url": string
+    }
+    "weightChecker": {
+      "name": string
+      "type": "sst.aws.Function"
     }
   }
 }
