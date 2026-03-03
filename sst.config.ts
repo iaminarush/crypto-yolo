@@ -33,7 +33,7 @@ export default $config({
 
     const tradeWorker = new sst.aws.Function("tradeYolo", {
       handler: "src/trade.tradeYolo",
-      link: [rwKey, supabaseKey, extendedApiKey, extendedStarkexKey],
+      link: [rwKey, supabaseKey, extendedApiKey, extendedStarkexKey, telegramToken, telegramId],
       timeout: "15 minutes",
       url: {
         cors: false,
