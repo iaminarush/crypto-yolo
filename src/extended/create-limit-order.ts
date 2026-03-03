@@ -10,8 +10,8 @@ import { createOrderContext } from "./utils/create-order-context";
 import { Decimal } from "./utils/number";
 import { roundToMinChange } from "./utils/round-to-min-change";
 
-const MIN_RETRY_DELAY_MS = 100;
-const MAX_RETRY_DELAY_MS = 200;
+const MIN_RETRY_DELAY_MS = 1000;
+const MAX_RETRY_DELAY_MS = 2000;
 
 const getRandomDelay = () =>
   Math.floor(Math.random() * (MAX_RETRY_DELAY_MS - MIN_RETRY_DELAY_MS + 1)) +
