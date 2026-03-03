@@ -17,7 +17,7 @@ import { Decimal, Long } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
 import { createLimitOrder } from "./extended/create-limit-order.ts";
 
-const SLEEP_MS = 3000;
+const SLEEP_MS = 15000;
 const MAX_RUNTIME_MS = 15 * 60 * 1000;
 
 export const tradeYolo: Handler = async () => {
@@ -43,9 +43,14 @@ export const tradeYolo: Handler = async () => {
     currentPositions,
   );
 
+  return Array.from(tickersToRebalance.values());
+
+  let isContinue = true;
+
   while (
     Date.now() - startTime < MAX_RUNTIME_MS &&
     tickersToRebalance.size > 0
+    // isContinue
   ) {
     for (const [ticker, desiredPosition] of tickersToRebalance) {
       const order = await getOrders({ marketsNames: [ticker] });
@@ -62,6 +67,8 @@ export const tradeYolo: Handler = async () => {
               )
             : BigNumber(0),
         );
+
+        console.log({ ticker, size, side });
 
         if (size.gt(0)) {
           const limitOrder = await createLimitOrder({
@@ -126,6 +133,8 @@ export const tradeYolo: Handler = async () => {
         }
       }
     }
+
+    isContinue = false;
 
     await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
   }
