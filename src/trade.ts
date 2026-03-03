@@ -17,7 +17,7 @@ import { Decimal, Long } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
 import { createLimitOrder } from "./extended/create-limit-order.ts";
 
-const SLEEP_MS = 1000;
+const SLEEP_MS = 3000;
 const MAX_RUNTIME_MS = 15 * 60 * 1000;
 
 export const tradeYolo: Handler = async () => {
@@ -43,19 +43,13 @@ export const tradeYolo: Handler = async () => {
     currentPositions,
   );
 
-  let isContinue = true;
-
   while (
     Date.now() - startTime < MAX_RUNTIME_MS &&
     tickersToRebalance.size > 0
-    // && isContinue
   ) {
     for (const [ticker, desiredPosition] of tickersToRebalance) {
-      // TODO: implement logic
-      // If no order for said ticker, calc orderSize using currentPosition and desiredPosition
-      // If exisitng order, use qty - filledQty as size
-
       const order = await getOrders({ marketsNames: [ticker] });
+      // If no order for said ticker, calc orderSize using currentPosition and desiredPosition
       if (order.length === 0) {
         const currentPosition = currentPositions.find(
           (p) => p.market === ticker,
@@ -82,8 +76,7 @@ export const tradeYolo: Handler = async () => {
         } else {
           tickersToRebalance.delete(ticker);
         }
-      } //TODO: Verify llm output
-      else {
+      } else {
         const existingOrder = order[0];
 
         if (existingOrder.status === "FILLED") {
@@ -102,10 +95,15 @@ export const tradeYolo: Handler = async () => {
             : orderbook.ask[0].price;
 
         if (existingOrder.price && !existingOrder.price.eq(bestPrice)) {
-          await cancelOrder(existingOrder.id.toString());
+          try {
+            await cancelOrder(existingOrder.id.toString());
+          } catch (error) {
+            console.error(`Cancel failed for ${existingOrder.id}:`, error);
+            continue;
+          }
 
-          const currentPositions = await getPositions({ markets: [ticker] });
-          const currentPosition = currentPositions[0];
+          const updatedPositions = await getPositions({ markets: [ticker] });
+          const currentPosition = updatedPositions[0];
 
           const { size, side } = calculateOrderSize(
             desiredPosition,
@@ -117,7 +115,7 @@ export const tradeYolo: Handler = async () => {
           );
 
           if (size.gt(0)) {
-            const limitOrder = await createLimitOrder({
+            await createLimitOrder({
               ticker,
               size,
               side,
@@ -130,10 +128,28 @@ export const tradeYolo: Handler = async () => {
     }
 
     await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
-    // isContinue = false;
   }
 
-  return;
+  const finalPositions = await getPositions();
+
+  const finalTickersToRebalance = filterTickersToRebalance(
+    desiredPositions,
+    finalPositions,
+  );
+
+  return {
+    success: finalTickersToRebalance.size === 0,
+    timedOut: Date.now() - startTime >= MAX_RUNTIME_MS,
+    runtimeMs: Date.now() - startTime,
+    initialTickersToRebalance: tickersToRebalance.size,
+    remainingTickers: Array.from(finalTickersToRebalance.keys()),
+    positions: finalPositions.map((p) => ({
+      market: p.market,
+      side: p.side,
+      size: p.size.toString(),
+      value: p.value.toString(),
+    })),
+  };
 };
 
 const calculateDesiredPositions = (
