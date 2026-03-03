@@ -5,47 +5,6 @@
 
 declare module "sst" {
   export interface Resource {
-    "EXTENDED_API_KEY": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "EXTENDED_STARKEX_KEY": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "FailureTopic": {
-      "arn": string
-      "type": "sst.aws.SnsTopic"
-    }
-    "ROBOTWEALTH_KEY": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "SUPABASE_KEY": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "TELEGRAM_ID": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "TELEGRAM_TOKEN": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "notifier": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "tradeYolo": {
-      "name": string
-      "type": "sst.aws.Function"
-      "url": string
-    }
-    "weightChecker": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
   }
 }
 /// <reference path="sst-env.d.ts" />
