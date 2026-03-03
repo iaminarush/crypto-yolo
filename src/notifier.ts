@@ -1,19 +1,18 @@
 import { Handler } from "aws-lambda";
 import { Resource } from "sst";
+import ky from "ky";
 
 export const handler: Handler = async (event) => {
   const message = formatTelegramMessage(event);
 
-  await fetch(
+  await ky.post(
     `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
     {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      json: {
         chat_id: Resource.TELEGRAM_ID.value,
         text: message,
         parse_mode: "HTML",
-      }),
+      },
     },
   );
 };
