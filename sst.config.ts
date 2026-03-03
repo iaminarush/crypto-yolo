@@ -57,14 +57,11 @@ export default $config({
 
     const weightChecker = new sst.aws.Function("weightChecker", {
       handler: "src/weight-checker.handler",
-      link: [rwKey, supabaseKey],
-      environment: {
-        TRADE_LAMBDA_ARN: tradeWorker.arn,
-      },
+      link: [rwKey, supabaseKey, tradeWorker],
     });
 
     new sst.aws.Cron("WeightCheck", {
-      schedule: "cron(*/30 0-2 * * ? *)",
+      schedule: "cron(5-20 9 * * ? *)",
       job: weightChecker.arn,
     });
   },
