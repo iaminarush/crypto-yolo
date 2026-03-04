@@ -5,7 +5,7 @@ import ky from "ky";
 import { Resource } from "sst";
 import { z } from "zod";
 import { Database } from "../database.types.ts";
-import { ROBOTWEALTH_API } from "./constants";
+import { ROBOTWEALTH_API, SUPABASE_URL } from "./constants";
 import { Market } from "./extended/api/markets.schema.ts";
 import { getMarkets } from "./extended/api/markets.ts";
 import { getOrders } from "./extended/api/orders";
@@ -23,6 +23,17 @@ const MAX_RUNTIME_MS = 15 * 60 * 1000;
 export const tradeYolo: Handler = async () => {
   await init();
   const startTime = Date.now();
+
+  const startMessage = `Extended Trade Lambda Started!`;
+  ky.post(
+    `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
+    {
+      json: {
+        chat_id: Resource.TELEGRAM_ID.value,
+        text: startMessage,
+      },
+    },
+  ).catch(console.error);
 
   const config = await getConfig();
   const volAndWeight = await getWeightsAndVolatilities(config);
@@ -62,8 +73,6 @@ export const tradeYolo: Handler = async () => {
               )
             : BigNumber(0),
         );
-
-        console.log({ ticker, size, side });
 
         if (size.gt(0)) {
           const limitOrder = await createLimitOrder({
@@ -153,7 +162,7 @@ export const tradeYolo: Handler = async () => {
     })),
   };
 
-  await sendTelegramMessage(result);
+  sendTelegramMessage(result).catch(console.error);
 
   return result;
 };
@@ -389,7 +398,7 @@ const getWeightsAndVolatilities = async (config: TConfig) => {
     });
 };
 
-const supabaseUrl = "https://lapkwtulywsjfjogngcx.supabase.co";
+const supabaseUrl = SUPABASE_URL;
 const supabaseKey = Resource.SUPABASE_KEY.value;
 const supabase = createClient<Database>(supabaseUrl, supabaseKey);
 
@@ -432,9 +441,10 @@ const sendTelegramMessage = async (result: TradeResult) => {
 
   const status = result.success ? "Success" : "Failed";
   const timeout = result.timedOut ? " (timed out)" : "";
-  const remainingList = result.remainingTickers.length > 0
-    ? result.remainingTickers.join(", ")
-    : "None";
+  const remainingList =
+    result.remainingTickers.length > 0
+      ? result.remainingTickers.join(", ")
+      : "None";
 
   const message = `Trading Complete!
 
