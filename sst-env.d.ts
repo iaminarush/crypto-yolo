@@ -33,6 +33,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "TimestampChecker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "notifier": {
       "name": string
       "type": "sst.aws.Function"
@@ -41,10 +45,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
       "url": string
-    }
-    "weightChecker": {
-      "name": string
-      "type": "sst.aws.Function"
     }
   }
 }

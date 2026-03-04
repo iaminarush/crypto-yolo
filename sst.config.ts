@@ -62,14 +62,14 @@ export default $config({
       },
     });
 
-    const weightChecker = new sst.aws.Function("weightChecker", {
-      handler: "src/weight-checker.handler",
+    const timestampChecker = new sst.aws.Function("TimestampChecker", {
+      handler: "src/timestamp-checker.handler",
       link: [rwKey, supabaseKey, tradeWorker],
     });
 
-    new sst.aws.Cron("WeightCheck", {
+    new sst.aws.Cron("TimestampCheck", {
       schedule: "cron(5-20 9 * * ? *)",
-      job: weightChecker.arn,
+      job: timestampChecker.arn,
     });
   },
 });
