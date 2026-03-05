@@ -20,7 +20,7 @@ import { createLimitOrder } from "./extended/create-limit-order.ts";
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 15 * 60 * 1000;
 
-export const tradeYolo: Handler = async () => {
+export const handler: Handler = async () => {
   await init();
   const startTime = Date.now();
 

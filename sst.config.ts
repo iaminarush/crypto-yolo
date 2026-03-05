@@ -21,6 +21,7 @@ export default $config({
     const extendedStarkexKey = new sst.Secret("EXTENDED_STARKEX_KEY");
     const telegramToken = new sst.Secret("TELEGRAM_TOKEN");
     const telegramId = new sst.Secret("TELEGRAM_ID");
+    const extendedLambdaKey = new sst.Secret("EXTENDED_LAMBDA_KEY");
 
     const errorTopic = new sst.aws.SnsTopic("FailureTopic");
 
@@ -31,8 +32,8 @@ export default $config({
 
     errorTopic.subscribe("FailureSubscriber", notifier.arn);
 
-    const tradeWorker = new sst.aws.Function("tradeYolo", {
-      handler: "src/trade.tradeYolo",
+    const extendedWorker = new sst.aws.Function("tradeExtended", {
+      handler: "src/trade-extended.handler",
       link: [
         rwKey,
         supabaseKey,
@@ -40,6 +41,7 @@ export default $config({
         extendedStarkexKey,
         telegramToken,
         telegramId,
+        extendedLambdaKey,
       ],
       timeout: "15 minutes",
       url: {
@@ -58,13 +60,13 @@ export default $config({
       treatMissingData: "notBreaching",
       alarmActions: [errorTopic.arn],
       dimensions: {
-        FunctionName: tradeWorker.name,
+        FunctionName: extendedWorker.name,
       },
     });
 
     const timestampChecker = new sst.aws.Function("TimestampChecker", {
       handler: "src/timestamp-checker.handler",
-      link: [rwKey, supabaseKey, tradeWorker],
+      link: [rwKey, supabaseKey, extendedWorker],
     });
 
     new sst.aws.Cron("TimestampCheck", {

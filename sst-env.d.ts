@@ -9,6 +9,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "EXTENDED_LAMBDA_KEY": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "EXTENDED_STARKEX_KEY": {
       "type": "sst.sst.Secret"
       "value": string
@@ -41,7 +45,7 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "tradeYolo": {
+    "tradeExtended": {
       "name": string
       "type": "sst.aws.Function"
       "url": string

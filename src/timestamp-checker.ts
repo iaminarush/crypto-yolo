@@ -102,7 +102,7 @@ export const handler = async () => {
     const client = new LambdaClient({ region: "ap-northeast-1" });
     await client.send(
       new InvokeCommand({
-        FunctionName: Resource.tradeYolo.name,
+        FunctionName: Resource.tradeExtended.name,
         InvocationType: "Event",
       }),
     );
