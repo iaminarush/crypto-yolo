@@ -25,6 +25,8 @@ export default $config({
 
     const errorTopic = new sst.aws.SnsTopic("FailureTopic");
 
+    const stage = $app.stage;
+
     const notifier = new sst.aws.Function("notifier", {
       handler: "src/notifier.handler",
       link: [telegramToken, telegramId],
@@ -72,6 +74,7 @@ export default $config({
     new sst.aws.Cron("TimestampCheck", {
       schedule: "cron(5-20 9 * * ? *)",
       job: timestampChecker.arn,
+      enabled: stage !== "dev",
     });
   },
 });
