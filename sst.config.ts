@@ -30,6 +30,7 @@ export default $config({
     const notifier = new sst.aws.Function("notifier", {
       handler: "src/notifier.handler",
       link: [telegramToken, telegramId],
+      runtime: "nodejs24.x",
     });
 
     errorTopic.subscribe("FailureSubscriber", notifier.arn);
@@ -49,6 +50,7 @@ export default $config({
       url: {
         cors: false,
       },
+      runtime: "nodejs24.x",
     });
 
     new aws.cloudwatch.MetricAlarm("WorkerErrorAlarm", {
@@ -69,9 +71,10 @@ export default $config({
     const timestampChecker = new sst.aws.Function("TimestampChecker", {
       handler: "src/timestamp-checker.handler",
       link: [rwKey, supabaseKey, extendedWorker],
+      runtime: "nodejs24.x",
     });
 
-    new sst.aws.Cron("TimestampCheck", {
+    new sst.aws.CronV2("TimestampCheck", {
       schedule: "cron(5-20 9 * * ? *)",
       job: timestampChecker.arn,
       enabled: stage !== "dev",
