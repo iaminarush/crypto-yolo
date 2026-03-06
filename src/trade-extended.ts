@@ -143,17 +143,12 @@ export const handler: Handler = async () => {
 
   const finalPositions = await getPositions();
 
-  const finalTickersToRebalance = filterTickersToRebalance(
-    desiredPositions,
-    finalPositions,
-  );
-
   const result: TradeResult = {
-    success: finalTickersToRebalance.size === 0,
+    success: tickersToRebalance.size === 0,
     timedOut: Date.now() - startTime >= MAX_RUNTIME_MS,
     runtimeMs: Date.now() - startTime,
     initialTickersToRebalance: tickersToRebalance.size,
-    remainingTickers: Array.from(finalTickersToRebalance.keys()),
+    remainingTickers: Array.from(tickersToRebalance.keys()),
     positions: finalPositions.map((p) => ({
       market: p.market,
       side: p.side,
