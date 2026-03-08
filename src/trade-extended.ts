@@ -58,6 +58,7 @@ export const handler: Handler = async () => {
     Date.now() - startTime < MAX_RUNTIME_MS &&
     tickersToRebalance.size > 0
   ) {
+    //TODO: Check if rounding up position size will cause position to go over bounds
     for (const [ticker, desiredPosition] of tickersToRebalance) {
       const order = await getOrders({ marketsNames: [ticker] });
       // If no order for said ticker, calc orderSize using currentPosition and desiredPosition
@@ -157,7 +158,7 @@ export const handler: Handler = async () => {
     })),
   };
 
-  sendTelegramMessage(result).catch(console.error);
+  await sendTelegramMessage(result).catch(console.error);
 
   return result;
 };
