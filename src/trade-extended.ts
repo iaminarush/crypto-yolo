@@ -55,9 +55,7 @@ export const handler: Handler = async () => {
     currentPositions,
   );
 
-  // return desiredPositions;
-
-  return Array.from(tickersToRebalance.values());
+  // return Array.from(tickersToRebalance.values());
 
   while (
     Date.now() - startTime < MAX_RUNTIME_MS &&
@@ -275,6 +273,10 @@ const filterTickersToRebalance = (
 
   for (const dp of desiredPositions) {
     const currentSize = positionMap.get(dp.extendedTicker);
+
+    if (dp.extendedTicker === "BTC-USD") {
+      console.log(dp.upperBound, dp.lowerBound);
+    }
 
     if (currentSize === undefined) {
       result.set(dp.extendedTicker, dp);
