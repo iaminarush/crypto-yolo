@@ -16,6 +16,7 @@ import { init } from "./extended/init";
 import { Decimal, Long } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
 import { createLimitOrder } from "./extended/create-limit-order.ts";
+import { roundToMinChange } from "./extended/utils/round-to-min-change.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
@@ -54,12 +55,17 @@ export const handler: Handler = async () => {
     currentPositions,
   );
 
+  // return desiredPositions;
+
+  return Array.from(tickersToRebalance.values());
+
   while (
     Date.now() - startTime < MAX_RUNTIME_MS &&
     tickersToRebalance.size > 0
   ) {
     //TODO: Check if rounding up position size will cause position to go over bounds
     for (const [ticker, desiredPosition] of tickersToRebalance) {
+      const market = markets.find((m) => m.name === ticker);
       const order = await getOrders({ marketsNames: [ticker] });
       // If no order for said ticker, calc orderSize using currentPosition and desiredPosition
       if (order.length === 0) {
@@ -73,6 +79,7 @@ export const handler: Handler = async () => {
                 currentPosition.side === "LONG" ? 1 : -1,
               )
             : BigNumber(0),
+          market,
         );
 
         if (size.gt(0)) {
@@ -212,6 +219,7 @@ type TDesiredPosition = ReturnType<typeof calculateDesiredPositions>[number];
 const calculateOrderSize = (
   desiredPosition: TDesiredPosition,
   currentPosition: BigNumber,
+  market?: Market,
 ): { size: BigNumber; side: "BUY" | "SELL" } => {
   if (
     currentPosition.gte(desiredPosition.lowerBound) &&
@@ -222,6 +230,7 @@ const calculateOrderSize = (
 
   if (currentPosition.lt(desiredPosition.lowerBound)) {
     const gap = desiredPosition.lowerBound.minus(currentPosition);
+
     let size = gap.lt(desiredPosition.minOrdersize)
       ? desiredPosition.minOrdersize
       : gap;
