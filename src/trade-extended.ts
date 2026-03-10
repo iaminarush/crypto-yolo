@@ -63,7 +63,6 @@ export const handler: Handler = async () => {
   ) {
     //TODO: Check if rounding up position size will cause position to go over bounds
     for (const [ticker, desiredPosition] of tickersToRebalance) {
-      const market = markets.find((m) => m.name === ticker);
       const order = await getOrders({ marketsNames: [ticker] });
       // If no order for said ticker, calc orderSize using currentPosition and desiredPosition
       if (order.length === 0) {
@@ -77,7 +76,6 @@ export const handler: Handler = async () => {
                 currentPosition.side === "LONG" ? 1 : -1,
               )
             : BigNumber(0),
-          market,
         );
 
         if (size.gt(0)) {
@@ -191,6 +189,8 @@ const calculateDesiredPositions = (
 
     const isPositive = tokenAllocation.gte(0);
 
+    const market = markets.find((m) => m.name === extendedTicker);
+
     return {
       rwTicker: vw.ticker,
       extendedTicker,
@@ -205,9 +205,10 @@ const calculateDesiredPositions = (
           1,
         ),
       ),
-      minOrdersize:
-        markets.find((m) => m.name === extendedTicker)?.tradingConfig
-          .minOrderSize ?? BigNumber(0),
+      minOrdersize: market ? market.tradingConfig.minOrderSize : BigNumber(0),
+      minOrdersizeChange: market
+        ? market.tradingConfig.minOrderSizeChange
+        : BigNumber(0),
     };
   });
 };
@@ -217,7 +218,6 @@ type TDesiredPosition = ReturnType<typeof calculateDesiredPositions>[number];
 const calculateOrderSize = (
   desiredPosition: TDesiredPosition,
   currentPosition: BigNumber,
-  market?: Market,
 ): { size: BigNumber; side: "BUY" | "SELL" } => {
   if (
     currentPosition.gte(desiredPosition.lowerBound) &&
@@ -233,7 +233,21 @@ const calculateOrderSize = (
       ? desiredPosition.minOrdersize
       : gap;
 
+    size = roundToMinChange(
+      size,
+      desiredPosition.minOrdersizeChange,
+      Decimal.ROUND_UP,
+    );
+
+    //TODO: Check
+    console.log(size);
+
     if (currentPosition.plus(size).gt(desiredPosition.upperBound)) {
+      console.log({
+        currentPosition,
+        size,
+        change: desiredPosition.minOrdersizeChange,
+      });
       size = BigNumber(0);
     }
 
@@ -251,6 +265,12 @@ const calculateOrderSize = (
     if (currentPosition.minus(size).lt(desiredPosition.lowerBound)) {
       size = BigNumber(0);
     }
+
+    size = roundToMinChange(
+      size,
+      desiredPosition.minOrdersizeChange,
+      Decimal.ROUND_UP,
+    );
 
     return { size, side: "SELL" };
   }
