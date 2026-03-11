@@ -17,6 +17,7 @@ import { Decimal, Long } from "./extended/utils/number";
 import { clamp, fetchAndParse } from "./util.ts";
 import { createLimitOrder } from "./extended/create-limit-order.ts";
 import { roundToMinChange } from "./extended/utils/round-to-min-change.ts";
+import { massCancel } from "./extended/api/mass-cancel.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
@@ -143,6 +144,28 @@ export const handler: Handler = async () => {
       }
 
       await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
+    }
+  }
+
+  await massCancel();
+  const postTradePositions = await getPositions();
+
+  const tickersToMarketOrder = filterTickersToRebalance(
+    desiredPositions,
+    postTradePositions,
+  );
+
+  for (const [ticker, desiredPosition] of tickersToRebalance) {
+    const currentPosition = postTradePositions.find((p) => p.market === ticker);
+    const { size, side } = calculateOrderSize(
+      desiredPosition,
+      currentPosition
+        ? currentPosition.size.times(currentPosition.side === "LONG" ? 1 : -1)
+        : BigNumber(0),
+    );
+
+    //TODO: finish post order
+    if (size.gt(0)) {
     }
   }
 
@@ -487,7 +510,6 @@ const sendTelegramMessage = async (result: TradeResult) => {
 
 ${status}${timeout}
 Runtime: ${minutes}m ${seconds}s
-Initial tickers: ${result.initialTickersToRebalance}
 Remaining: ${remainingList}`;
 
   await ky.post(
