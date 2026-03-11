@@ -66,7 +66,8 @@ export const handler: Handler = async () => {
       const order = await getOrders({ marketsNames: [ticker] });
       // If no order for said ticker, calc orderSize using currentPosition and desiredPosition
       if (order.length === 0) {
-        const currentPosition = currentPositions.find(
+        const updatedPositions = await getPositions();
+        const currentPosition = updatedPositions.find(
           (p) => p.market === ticker,
         );
         const { size, side } = calculateOrderSize(
@@ -239,16 +240,18 @@ const calculateOrderSize = (
       Decimal.ROUND_UP,
     );
 
-    //TODO: Check
-    console.log(size);
+    const roundedDown = roundToMinChange(
+      size,
+      desiredPosition.minOrdersizeChange,
+      Decimal.ROUND_DOWN,
+    );
 
     if (currentPosition.plus(size).gt(desiredPosition.upperBound)) {
-      console.log({
-        currentPosition,
-        size,
-        change: desiredPosition.minOrdersizeChange,
-      });
-      size = BigNumber(0);
+      if (currentPosition.plus(roundedDown).gt(desiredPosition.upperBound)) {
+        size = BigNumber(0);
+      } else {
+        size = roundedDown;
+      }
     }
 
     return { size, side: "BUY" };
@@ -258,19 +261,30 @@ const calculateOrderSize = (
     const gap = desiredPosition.upperBound
       .minus(currentPosition)
       .absoluteValue();
+
     let size = gap.lt(desiredPosition.minOrdersize)
       ? desiredPosition.minOrdersize
       : gap;
-
-    if (currentPosition.minus(size).lt(desiredPosition.lowerBound)) {
-      size = BigNumber(0);
-    }
 
     size = roundToMinChange(
       size,
       desiredPosition.minOrdersizeChange,
       Decimal.ROUND_UP,
     );
+
+    const roundedDown = roundToMinChange(
+      size,
+      desiredPosition.minOrdersizeChange,
+      Decimal.ROUND_DOWN,
+    );
+
+    if (currentPosition.minus(size).lt(desiredPosition.lowerBound)) {
+      if (currentPosition.minus(roundedDown).lt(desiredPosition.lowerBound)) {
+        size = BigNumber(0);
+      } else {
+        size = roundedDown;
+      }
+    }
 
     return { size, side: "SELL" };
   }
@@ -293,10 +307,6 @@ const filterTickersToRebalance = (
 
   for (const dp of desiredPositions) {
     const currentSize = positionMap.get(dp.extendedTicker);
-
-    if (dp.extendedTicker === "BTC-USD") {
-      console.log(dp.upperBound, dp.lowerBound);
-    }
 
     if (currentSize === undefined) {
       result.set(dp.extendedTicker, dp);
