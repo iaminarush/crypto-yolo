@@ -84,7 +84,10 @@ const getToday9AMUTC = () => {
 };
 
 const updateLastTriggered = async (timestamp: number) => {
-  await supabase.from("timestamp").upsert({ timestamp }).eq("id", TIMESTAMP_ID);
+  await supabase
+    .from("timestamp")
+    .upsert({ id: TIMESTAMP_ID, timestamp })
+    .eq("id", TIMESTAMP_ID);
 };
 
 export const handler = async () => {
