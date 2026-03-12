@@ -1,10 +1,10 @@
+import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { createClient } from "@supabase/supabase-js";
-import { Resource } from "sst";
-import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import ky from "ky";
+import { Resource } from "sst";
 import { z } from "zod";
-import { Database } from "../database.types.ts";
-import { ROBOTWEALTH_API, SUPABASE_URL } from "./constants.ts";
+import type { Database } from "../database.types.ts";
+import { ROBOTWEALTH_API, SUPABASE_URL, TIMESTAMP_ID } from "./constants.ts";
 
 const supabaseUrl = SUPABASE_URL;
 const supabaseKey = Resource.SUPABASE_KEY.value;
@@ -48,13 +48,25 @@ const getVolatilities = async () => {
 
 const getStoredTimestamp = async () => {
   const { data } = await supabase
-    .from("exchange")
-    .select("last_triggered_timestamp")
-    .eq("exchange", "extended")
+    .from("timestamp")
+    .select("*")
+    .eq("id", TIMESTAMP_ID)
     .single();
 
+  if (!data) {
+    const result = await supabase
+      .from("timestamp")
+      .upsert({ id: TIMESTAMP_ID, timestamp: 0 })
+      .select()
+      .single();
+
+    return {
+      lastTriggeredTimestamp: result.data?.timestamp || 0,
+    };
+  }
+
   return {
-    lastTriggeredTimestamp: data?.last_triggered_timestamp ?? 0,
+    lastTriggeredTimestamp: data.timestamp,
   };
 };
 
@@ -72,12 +84,7 @@ const getToday9AMUTC = () => {
 };
 
 const updateLastTriggered = async (timestamp: number) => {
-  await supabase
-    .from("exchange")
-    .update({
-      last_triggered_timestamp: timestamp,
-    })
-    .eq("exchange", "extended");
+  await supabase.from("timestamp").upsert({ timestamp }).eq("id", TIMESTAMP_ID);
 };
 
 export const handler = async () => {
