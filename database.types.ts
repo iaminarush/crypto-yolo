@@ -20,7 +20,6 @@ export type Database = {
           carry_weight: number
           exchange: string
           id: number
-          last_triggered_timestamp: number | null
           momentum_weight: number
           trade_buffer: number
           trend_weight: number
@@ -30,7 +29,6 @@ export type Database = {
           carry_weight?: number
           exchange: string
           id?: number
-          last_triggered_timestamp?: number | null
           momentum_weight?: number
           trade_buffer?: number
           trend_weight?: number
@@ -40,7 +38,6 @@ export type Database = {
           carry_weight?: number
           exchange?: string
           id?: number
-          last_triggered_timestamp?: number | null
           momentum_weight?: number
           trade_buffer?: number
           trend_weight?: number
