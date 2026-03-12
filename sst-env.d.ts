@@ -49,7 +49,6 @@ declare module "sst" {
     "tradeExtended": {
       "name": string
       "type": "sst.aws.Function"
-      "url": string
     }
   }
 }
