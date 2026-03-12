@@ -68,15 +68,15 @@ export type Database = {
       timestamp: {
         Row: {
           id: number
-          timestamp: number | null
+          timestamp: number
         }
         Insert: {
           id?: number
-          timestamp?: number | null
+          timestamp: number
         }
         Update: {
           id?: number
-          timestamp?: number | null
+          timestamp?: number
         }
         Relationships: []
       }
