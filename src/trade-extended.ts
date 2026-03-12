@@ -27,7 +27,7 @@ export const handler: Handler = async () => {
   await init();
   const startTime = Date.now();
 
-  const startMessage = `Extended Trade Lambda Started!`;
+  const startMessage = `Extended Lambda Started!`;
   ky.post(
     `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
     {
@@ -505,7 +505,7 @@ const sendTelegramMessage = async (result: TradeResult) => {
       ? result.remainingTickers.join(", ")
       : "None";
 
-  const message = `Trading Complete!
+  const message = `Extended Trading Complete!
 
 ${status}${timeout}
 Runtime: ${minutes}m ${seconds}s
