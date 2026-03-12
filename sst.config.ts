@@ -47,9 +47,6 @@ export default $config({
         extendedLambdaKey,
       ],
       timeout: "15 minutes",
-      url: {
-        cors: false,
-      },
       runtime: "nodejs24.x",
     });
 
