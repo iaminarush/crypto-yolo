@@ -1,23 +1,24 @@
 import { createClient } from "@supabase/supabase-js";
-import { Handler } from "aws-lambda";
+import type { Handler } from "aws-lambda";
 import BigNumber from "bignumber.js";
 import ky from "ky";
 import { Resource } from "sst";
 import { z } from "zod";
-import { Database } from "../database.types.ts";
+import type { Database } from "../database.types.ts";
 import { ROBOTWEALTH_API, SUPABASE_URL } from "./constants";
-import { Market } from "./extended/api/markets.schema.ts";
-import { getMarkets } from "./extended/api/markets.ts";
-import { getOrders } from "./extended/api/orders";
-import { getOrderbook } from "./extended/api/orderbook";
 import { cancelOrder } from "./extended/api/cancel-order";
+import type { Market } from "./extended/api/markets.schema.ts";
+import { getMarkets } from "./extended/api/markets.ts";
+import { massCancel } from "./extended/api/mass-cancel.ts";
+import { getOrderbook } from "./extended/api/orderbook";
+import { getOrders } from "./extended/api/orders";
 import { getPositions, type Position } from "./extended/api/positions";
+import { createLimitOrder } from "./extended/create-limit-order.ts";
 import { init } from "./extended/init";
 import { Decimal, Long } from "./extended/utils/number";
-import { clamp, fetchAndParse } from "./util.ts";
-import { createLimitOrder } from "./extended/create-limit-order.ts";
 import { roundToMinChange } from "./extended/utils/round-to-min-change.ts";
-import { massCancel } from "./extended/api/mass-cancel.ts";
+import { clamp, fetchAndParse } from "./util.ts";
+import { createMarketOrder } from "./extended/create-market-order.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
@@ -65,7 +66,6 @@ export const handler: Handler = async () => {
     //TODO: Check if rounding up position size will cause position to go over bounds
     for (const [ticker, desiredPosition] of tickersToRebalance) {
       const order = await getOrders({ marketsNames: [ticker] });
-      // If no order for said ticker, calc orderSize using currentPosition and desiredPosition
       if (order.length === 0) {
         const updatedPositions = await getPositions();
         const currentPosition = updatedPositions.find(
@@ -155,7 +155,7 @@ export const handler: Handler = async () => {
     postTradePositions,
   );
 
-  for (const [ticker, desiredPosition] of tickersToRebalance) {
+  for (const [ticker, desiredPosition] of tickersToMarketOrder) {
     const currentPosition = postTradePositions.find((p) => p.market === ticker);
     const { size, side } = calculateOrderSize(
       desiredPosition,
@@ -166,6 +166,7 @@ export const handler: Handler = async () => {
 
     //TODO: finish post order
     if (size.gt(0)) {
+      await createMarketOrder({ ticker, size, side });
     }
   }
 
@@ -175,7 +176,6 @@ export const handler: Handler = async () => {
     success: tickersToRebalance.size === 0,
     timedOut: Date.now() - startTime >= MAX_RUNTIME_MS,
     runtimeMs: Date.now() - startTime,
-    initialTickersToRebalance: tickersToRebalance.size,
     remainingTickers: Array.from(tickersToRebalance.keys()),
     positions: finalPositions.map((p) => ({
       market: p.market,
@@ -463,7 +463,7 @@ const supabaseKey = Resource.SUPABASE_KEY.value;
 const supabase = createClient<Database>(supabaseUrl, supabaseKey);
 
 export const getConfig = async () => {
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from("exchange")
     .select()
     .eq("exchange", "extended")
@@ -478,7 +478,7 @@ export const getConfig = async () => {
 };
 
 export const getTickers = async () => {
-  const { data, error } = await supabase.from("ticker").select();
+  const { data } = await supabase.from("ticker").select();
 
   if (!data) throw new Error("No exchange config in DB");
 
@@ -489,7 +489,6 @@ type TradeResult = {
   success: boolean;
   timedOut: boolean;
   runtimeMs: number;
-  initialTickersToRebalance: number;
   remainingTickers: string[];
   positions: { market: string; side: string; size: string; value: string }[];
 };

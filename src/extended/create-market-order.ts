@@ -1,12 +1,15 @@
 import { getFees } from "./api/fees";
 import { getMarket } from "./api/markets";
+import { placeOrder } from "./api/order";
 import { getStarknetDomain } from "./api/starknet";
 import { init } from "./init";
 import { Order } from "./models/order";
-import { OrderSide } from "./models/order.types";
+import type { OrderSide } from "./models/order.types";
 import { createOrderContext } from "./utils/create-order-context";
 import { Decimal } from "./utils/number";
 import { roundToMinChange } from "./utils/round-to-min-change";
+
+const SLIPPAGE = 0.005;
 
 export const createMarketOrder = async ({
   ticker,
@@ -41,7 +44,9 @@ export const createMarketOrder = async ({
       Decimal.ROUND_DOWN,
     ),
     price: roundToMinChange(
-      BigNumber(1),
+      side === "BUY"
+        ? market.marketStats.askPrice.times(Decimal(1).plus(SLIPPAGE))
+        : market.marketStats.bidPrice.times(Decimal(1).minus(SLIPPAGE)),
       market.tradingConfig.minOrderSizeChange,
       Decimal.ROUND_DOWN,
     ),
@@ -50,4 +55,8 @@ export const createMarketOrder = async ({
     postOnly: false,
     ctx,
   });
+
+  const result = await placeOrder({ order });
+
+  return result;
 };
