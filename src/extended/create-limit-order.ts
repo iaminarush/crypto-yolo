@@ -5,7 +5,7 @@ import { getOrderbook } from "./api/orderbook";
 import { getStarknetDomain } from "./api/starknet";
 import { init } from "./init";
 import { Order } from "./models/order";
-import { type OrderSide } from "./models/order.types.ts";
+import type { OrderSide } from "./models/order.types.ts";
 import { createOrderContext } from "./utils/create-order-context";
 import { Decimal } from "./utils/number";
 import { roundToMinChange } from "./utils/round-to-min-change";
