@@ -14,11 +14,11 @@ import { getOrderbook } from "./extended/api/orderbook";
 import { getOrders } from "./extended/api/orders";
 import { getPositions, type Position } from "./extended/api/positions";
 import { createLimitOrder } from "./extended/create-limit-order.ts";
+import { createMarketOrder } from "./extended/create-market-order.ts";
 import { init } from "./extended/init";
 import { Decimal, Long } from "./extended/utils/number";
 import { roundToMinChange } from "./extended/utils/round-to-min-change.ts";
 import { clamp, fetchAndParse } from "./util.ts";
-import { createMarketOrder } from "./extended/create-market-order.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
