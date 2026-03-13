@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-lambda": "^3.1000.0",
+    "@nktkas/hyperliquid": "^0.32.1",
     "@supabase/supabase-js": "^2.90.1",
     "@x10xchange/stark-crypto-wrapper-wasm": "^0.2.0",
     "axios": "^1.13.4",

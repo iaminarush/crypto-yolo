@@ -11,6 +11,9 @@ importers:
       '@aws-sdk/client-lambda':
         specifier: ^3.1000.0
         version: 3.1000.0
+      '@nktkas/hyperliquid':
+        specifier: ^0.32.1
+        version: 0.32.1(typescript@5.9.3)
       '@supabase/supabase-js':
         specifier: ^2.90.1
         version: 2.90.1
@@ -402,6 +405,14 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@nktkas/hyperliquid@0.32.1':
+    resolution: {integrity: sha512-yikHMax+MGEkC4Wam6FFgMweox9FCVzSjc4i3tnnbabzmV02BRACoPFoA6HXstZJWEcs02wVsXvcuW112x2X0A==}
+    engines: {node: '>=20.19.0'}
+
+  '@nktkas/rews@2.0.2':
+    resolution: {integrity: sha512-Erc8E7Q/tr9kCcdOvtJxz3TjpowMZMfUx9cbBuWqtty126p84HlySmoXTfzhtpJy3Poov3e+a1FRe9Pwa7+Gcw==}
+    engines: {node: '>=20.19.0'}
+
   '@noble/curves@1.7.0':
     resolution: {integrity: sha512-UTMhXK9SeDhFJVrHeUJ5uZlI6ajXg10O6Ddocf9S6GjbSBVZsJo88HzKwXznNfGpMTRDyJkqMjNDPYgf0qFWnw==}
     engines: {node: ^14.21.3 || >=16}
@@ -421,6 +432,10 @@ packages:
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@2.0.1':
+    resolution: {integrity: sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw==}
+    engines: {node: '>= 20.19.0'}
 
   '@scure/base@1.2.6':
     resolution: {integrity: sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg==}
@@ -1159,6 +1174,14 @@ packages:
     resolution: {integrity: sha512-jOXGuXZAWdsTH7eZLtyXMqUb9EcWMGZNbL9YcGBJl4MH4nrxHmZJhEHvyLFrkxo+28uLb/NYRcStH48fnD0Vzw==}
     hasBin: true
 
+  valibot@1.2.0:
+    resolution: {integrity: sha512-mm1rxUsmOxzrwnX5arGS+U4T25RdvpPjPN4yR0u9pUBov9+zGVtO84tif1eY4r6zWxVxu3KzIyknJy3rxfRZZg==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   watchpack@2.4.4:
     resolution: {integrity: sha512-c5EGNOiyxxV5qmTtAB7rbiXxi1ooX1pQKMLX/MIabJjRA0SJBQOjKF+KSVfHkr9U1cADPon0mRiVe/riyaiDUA==}
     engines: {node: '>=10.13.0'}
@@ -1661,6 +1684,16 @@ snapshots:
   '@esbuild/win32-x64@0.27.2':
     optional: true
 
+  '@nktkas/hyperliquid@0.32.1(typescript@5.9.3)':
+    dependencies:
+      '@nktkas/rews': 2.0.2
+      '@noble/hashes': 2.0.1
+      valibot: 1.2.0(typescript@5.9.3)
+    transitivePeerDependencies:
+      - typescript
+
+  '@nktkas/rews@2.0.2': {}
+
   '@noble/curves@1.7.0':
     dependencies:
       '@noble/hashes': 1.6.0
@@ -1674,6 +1707,8 @@ snapshots:
   '@noble/hashes@1.6.1': {}
 
   '@noble/hashes@1.8.0': {}
+
+  '@noble/hashes@2.0.1': {}
 
   '@scure/base@1.2.6': {}
 
@@ -2428,7 +2463,7 @@ snapshots:
     dependencies:
       '@adraffy/ens-normalize': 1.11.1
       '@noble/curves': 1.7.0
-      '@noble/hashes': 1.6.1
+      '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
       abitype: 1.2.3(typescript@5.9.3)(zod@4.3.5)
@@ -2574,6 +2609,10 @@ snapshots:
       which-typed-array: 1.1.19
 
   uuid@8.0.0: {}
+
+  valibot@1.2.0(typescript@5.9.3):
+    optionalDependencies:
+      typescript: 5.9.3
 
   watchpack@2.4.4:
     dependencies:
