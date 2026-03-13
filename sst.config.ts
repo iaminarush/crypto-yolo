@@ -23,6 +23,8 @@ export default $config({
     const telegramId = new sst.Secret("TELEGRAM_ID");
     const extendedLambdaKey = new sst.Secret("EXTENDED_LAMBDA_KEY");
 
+    const hyperliquidWallet = new sst.Secret("HYPERLIQUID_WALLET");
+
     const errorTopic = new sst.aws.SnsTopic("FailureTopic");
 
     const stage = $app.stage;
@@ -50,6 +52,13 @@ export default $config({
       runtime: "nodejs24.x",
     });
 
+    const hyperliquidWorker = new sst.aws.Function("tradeHyperliquid", {
+      handler: "src/trade-hyperliquid.handler",
+      link: [rwKey, supabaseKey, telegramToken, telegramId, hyperliquidWallet],
+      timeout: "15 minutes",
+      runtime: "nodejs24.x",
+    });
+
     new aws.cloudwatch.MetricAlarm("WorkerErrorAlarm", {
       comparisonOperator: "GreaterThanOrEqualToThreshold",
       evaluationPeriods: 1,
@@ -67,7 +76,7 @@ export default $config({
 
     const timestampChecker = new sst.aws.Function("TimestampChecker", {
       handler: "src/timestamp-checker.handler",
-      link: [rwKey, supabaseKey, extendedWorker],
+      link: [rwKey, supabaseKey, extendedWorker, hyperliquidWorker],
       runtime: "nodejs24.x",
     });
 

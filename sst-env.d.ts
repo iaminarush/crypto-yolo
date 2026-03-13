@@ -22,6 +22,10 @@ declare module "sst" {
       "arn": string
       "type": "sst.aws.SnsTopic"
     }
+    "HYPERLIQUID_WALLET": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "ROBOTWEALTH_KEY": {
       "type": "sst.sst.Secret"
       "value": string
@@ -47,6 +51,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "tradeExtended": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "tradeHyperliquid": {
       "name": string
       "type": "sst.aws.Function"
     }
