@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "nktkas/hyperliquid": {
+      "type": "remote",
+      "url": "https://nktkas.gitbook.io/hyperliquid/~gitbook/mcp",
+      "enabled": true,
+    },
+  },
+}
