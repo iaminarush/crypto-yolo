@@ -1,12 +1,9 @@
-import { createClient } from "@supabase/supabase-js";
 import type { Handler } from "aws-lambda";
 import BigNumber from "bignumber.js";
 import ky from "ky";
 import { Resource } from "sst";
-import { z } from "zod";
 import type { Database } from "../database.types.ts";
-import { getConfig, getWeightsAndVolatilities } from "./api.ts";
-import { SUPABASE_URL } from "./constants";
+import { getConfig, getTickers, getWeightsAndVolatilities } from "./api.ts";
 import { cancelOrder } from "./extended/api/cancel-order";
 import type { Market } from "./extended/api/markets.schema.ts";
 import { getMarkets } from "./extended/api/markets.ts";
@@ -63,7 +60,6 @@ export const handler: Handler = async () => {
     Date.now() - startTime < MAX_RUNTIME_MS &&
     tickersToRebalance.size > 0
   ) {
-    //TODO: Check if rounding up position size will cause position to go over bounds
     for (const [ticker, desiredPosition] of tickersToRebalance) {
       const order = await getOrders({ marketsNames: [ticker] });
       if (order.length === 0) {
@@ -344,27 +340,6 @@ const filterTickersToRebalance = (
   }
 
   return result;
-};
-
-const Weight = z.object({
-  ticker: z.string(),
-  arrival_price: z.number(),
-  carry_megafactor: z.number(),
-  combo_weight: z.number(),
-  momentum_megafactor: z.number(),
-  trend_megafactor: z.number(),
-});
-
-const supabaseUrl = SUPABASE_URL;
-const supabaseKey = Resource.SUPABASE_KEY.value;
-const supabase = createClient<Database>(supabaseUrl, supabaseKey);
-
-export const getTickers = async () => {
-  const { data } = await supabase.from("ticker").select();
-
-  if (!data) throw new Error("No exchange config in DB");
-
-  return data;
 };
 
 type TradeResult = {

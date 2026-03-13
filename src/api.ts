@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import BigNumber from "bignumber.js";
 import type { Database } from "database.types";
 import ky from "ky";
 import { Resource } from "sst";
@@ -10,7 +11,7 @@ const supabaseUrl = SUPABASE_URL;
 const supabaseKey = Resource.SUPABASE_KEY.value;
 const supabase = createClient<Database>(supabaseUrl, supabaseKey);
 
-export const getConfig = async (exchange: "extended" | "hyperliquid") => {
+export const getConfig = async (exchange: TExchangeNames) => {
   const { data } = await supabase
     .from("exchange")
     .select()
@@ -136,3 +137,13 @@ const getVolatilities = async () =>
         .json(),
     VolSchema,
   );
+
+export type TExchangeNames = "extended" | "hyperliquid";
+
+export const getTickers = async () => {
+  const { data } = await supabase.from("ticker").select();
+
+  if (!data) throw new Error("No exchange config in DB");
+
+  return data;
+};
