@@ -47,16 +47,19 @@ export type Database = {
       ticker: {
         Row: {
           extended_ticker: string
+          hyperliquid_ticker: string | null
           id: number
           rbw_ticker: string
         }
         Insert: {
           extended_ticker: string
+          hyperliquid_ticker?: string | null
           id?: number
           rbw_ticker?: string
         }
         Update: {
           extended_ticker?: string
+          hyperliquid_ticker?: string | null
           id?: number
           rbw_ticker?: string
         }
