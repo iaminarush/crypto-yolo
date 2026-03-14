@@ -6,5 +6,10 @@
       "url": "https://nktkas.gitbook.io/hyperliquid/~gitbook/mcp",
       "enabled": true,
     },
+    "hyperliquid": {
+      "type": "remote",
+      "url": "https://hyperliquid.gitbook.io/hyperliquid-docs/~gitbook/mcp",
+      "enabled": true,
+    },
   },
 }
