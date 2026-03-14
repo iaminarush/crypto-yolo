@@ -57,6 +57,17 @@ export const handler: Handler = async () => {
       //TODO: Implement trading loop
       const order = await getOpenOrder(client, ticker);
       if (!order) {
+        const { assetPositions: updatedPositions } =
+          await client.clearinghouseState({
+            user: WALLET,
+          });
+        const currentPosition = updatedPositions.find(
+          (p) => p.position.coin === ticker,
+        );
+        const orderSize = calculateOrderSize(
+          desiredPosition,
+          BigNumber(currentPosition ? currentPosition.position.szi : 0),
+        );
       } else {
       }
     }
@@ -103,7 +114,9 @@ const calculateDesiredPositions = (
           1,
         ),
       ),
-      minOrderSize: market ? getMinOrderSize(market.szDecimals) : BigNumber(0),
+      minOrderSizeChange: market
+        ? getMinOrderSizeChange(market.szDecimals)
+        : BigNumber(0),
     };
   });
 };
@@ -137,8 +150,36 @@ const filterTickersToRebalance = (
   return result;
 };
 
-function getMinOrderSize(szDecimals: number): BigNumber {
+//TODO: Currently WIP
+function calculateOrderSize(
+  desiredPosition: TDesiredPosition,
+  currentPosition: BigNumber,
+) {
+  if (
+    currentPosition.gte(desiredPosition.lowerBound) &&
+    currentPosition.lte(desiredPosition.upperBound)
+  ) {
+    return { size: BigNumber(0), side: "BUY" };
+  }
+  if (currentPosition.lt(desiredPosition.lowerBound)) {
+    const gap = desiredPosition.lowerBound.minus(currentPosition);
+
+    if (gap.lt(desiredPosition.minOrderSizeChange)) {
+      return { size: BigNumber(0), side: "BUY" };
+    }
+  }
+}
+
+function getMinOrderSizeChange(szDecimals: number): BigNumber {
   return new BigNumber(1).dividedBy(new BigNumber(10).pow(szDecimals));
+}
+
+function roundToDecimal(
+  value: BigNumber,
+  szDecimals: number,
+  roundingMode?: BigNumber.RoundingMode,
+) {
+  return value.decimalPlaces(szDecimals, roundingMode);
 }
 
 async function getOpenOrder(
