@@ -22,6 +22,10 @@ declare module "sst" {
       "arn": string
       "type": "sst.aws.SnsTopic"
     }
+    "HYPERLIQUID_KEY": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "HYPERLIQUID_WALLET": {
       "type": "sst.sst.Secret"
       "value": string

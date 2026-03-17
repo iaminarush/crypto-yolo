@@ -24,6 +24,7 @@ export default $config({
     const extendedLambdaKey = new sst.Secret("EXTENDED_LAMBDA_KEY");
 
     const hyperliquidWallet = new sst.Secret("HYPERLIQUID_WALLET");
+    const hyperliquidKey = new sst.Secret("HYPERLIQUID_KEY");
 
     const errorTopic = new sst.aws.SnsTopic("FailureTopic");
 
@@ -54,7 +55,14 @@ export default $config({
 
     const hyperliquidWorker = new sst.aws.Function("tradeHyperliquid", {
       handler: "src/trade-hyperliquid.handler",
-      link: [rwKey, supabaseKey, telegramToken, telegramId, hyperliquidWallet],
+      link: [
+        rwKey,
+        supabaseKey,
+        telegramToken,
+        telegramId,
+        hyperliquidWallet,
+        hyperliquidKey,
+      ],
       timeout: "15 minutes",
       runtime: "nodejs24.x",
     });
