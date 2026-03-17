@@ -1,3 +1,4 @@
+import { SLIPPAGE } from "@/constants";
 import { getFees } from "./api/fees";
 import { getMarket } from "./api/markets";
 import { placeOrder } from "./api/order";
@@ -8,8 +9,6 @@ import type { OrderSide } from "./models/order.types";
 import { createOrderContext } from "./utils/create-order-context";
 import { Decimal } from "./utils/number";
 import { roundToMinChange } from "./utils/round-to-min-change";
-
-const SLIPPAGE = 0.005;
 
 export const createMarketOrder = async ({
   ticker,
