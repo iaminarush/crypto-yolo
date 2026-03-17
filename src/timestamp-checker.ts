@@ -108,6 +108,8 @@ export const handler = async () => {
   const shouldTrigger =
     notTriggeredToday && weightsUpdatedToday && volUpdatedToday;
 
+  console.log(notTriggeredToday, weightsUpdatedToday, volUpdatedToday);
+
   if (shouldTrigger) {
     const client = new LambdaClient({ region: "ap-northeast-1" });
     await client.send(
