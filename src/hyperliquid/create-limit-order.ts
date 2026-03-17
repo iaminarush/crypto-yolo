@@ -57,7 +57,7 @@ export const createLimitOrder = async ({
           {
             a: assetId,
             b: isBuy,
-            p: formatPrice(0.3, szDecimals),
+            p: formatPrice(price, szDecimals),
             s: size.toNumber(),
             r: false,
             t: { limit: { tif: "Alo" } },
