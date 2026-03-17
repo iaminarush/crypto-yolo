@@ -6,14 +6,16 @@ import {
   InfoClient,
   type MetaResponse,
 } from "@nktkas/hyperliquid";
-import { SymbolConverter } from "@nktkas/hyperliquid/utils";
+import { formatPrice, SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type { Handler } from "aws-lambda";
 import BN from "bignumber.js";
 import type { Database } from "database.types";
+import ky from "ky";
 import { Resource } from "sst";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getConfig, getTickers, getWeightsAndVolatilities } from "./api";
+import { SLIPPAGE } from "./constants";
 import { createLimitOrder } from "./hyperliquid/create-limit-order";
 
 const SLEEP_MS = 1000;
@@ -22,17 +24,17 @@ const MINIMUM_ORDER_VALUE = BN(10);
 
 export const handler: Handler = async () => {
   const startTime = Date.now();
-  // const startMessage = `Hyperliquid Lambda Started!`;
-  // ky.post(
-  //   `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
-  //   {
-  //     json: {
-  //       chat_id: Resource.TELEGRAM_ID.value,
-  //       text: startMessage,
-  //     },
-  //   },
-  // ).catch(console.error);
-  //
+  const startMessage = `Hyperliquid Lambda Started!`;
+  ky.post(
+    `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
+    {
+      json: {
+        chat_id: Resource.TELEGRAM_ID.value,
+        text: startMessage,
+      },
+    },
+  ).catch(console.error);
+
   const WALLET = Resource.HYPERLIQUID_WALLET.value as Hex;
   const transport = new HttpTransport();
   const client = new InfoClient({ transport });
@@ -64,10 +66,9 @@ export const handler: Handler = async () => {
     Date.now() - startTime < MAX_RUNTIME_MS &&
     tickersToRebalance.size > 0
   ) {
+    const allMids = await client.allMids();
     for (const [ticker, desiredPosition] of tickersToRebalance) {
-      //TODO: Implement trading loop
       const order = await getOpenOrder(client, ticker);
-      const allMids = await client.allMids();
 
       if (!order) {
         const { assetPositions: updatedPositions } =
@@ -147,21 +148,65 @@ export const handler: Handler = async () => {
   );
 
   for (const [ticker, desiredPosition] of tickersToMarketOrder) {
+    const allMids = await client.allMids();
     const currentPosition = postTradePositions.find(
       (p) => p.position.coin === ticker,
     );
-    const allMids = await client.allMids();
     const { size, side } = calculateOrderSize(
       desiredPosition,
       BN(currentPosition ? currentPosition.position.szi : 0),
       allMids,
     );
 
-    //TODO: finish post order
     if (size.gt(0)) {
-      await createMarketOrder({ ticker, size, side });
+      const mid = allMids[ticker];
+      const price =
+        parseFloat(mid) * (1 + (side === "BUY" ? SLIPPAGE : -SLIPPAGE));
+      await exchange.order({
+        orders: [
+          {
+            a: converter.getAssetId(ticker) || "",
+            b: side === "BUY",
+            p: formatPrice(price, converter.getSzDecimals(ticker) || 0),
+            s: size.toNumber(),
+            r: false,
+            t: { limit: { tif: "Gtc" } },
+          },
+        ],
+      });
     }
   }
+
+  const runtimeMs = Date.now() - startTime;
+  const timedOut = runtimeMs >= MAX_RUNTIME_MS;
+  const minutes = Math.floor(runtimeMs / 60000);
+  const seconds = Math.floor((runtimeMs % 60000) / 1000);
+
+  const status = tickersToRebalance.size === 0 ? "Success" : "Incomplete";
+  const timeout = timedOut ? " (Timed out)" : "";
+  const remainingList =
+    tickersToRebalance.size > 0
+      ? Array.from(tickersToRebalance.keys()).join(", ")
+      : "None";
+
+  const message = `Hyperliquid Trading Complete!
+
+${status}${timeout}
+Runtime: ${minutes}m ${seconds}s
+Remaining: ${remainingList}`;
+
+  await ky
+    .post(
+      `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
+      {
+        json: {
+          chat_id: Resource.TELEGRAM_ID.value,
+          text: message,
+          parse_mode: "HTML",
+        },
+      },
+    )
+    .catch(console.error);
 };
 
 const calculateDesiredPositions = (
@@ -281,8 +326,8 @@ function calculateOrderSize(
     const roundedUp = roundToDecimal(size, szDecimals, BN.ROUND_UP);
     const roundedDown = roundToDecimal(size, szDecimals, BN.ROUND_DOWN);
 
-    if (currentPosition.minus(roundedUp).gt(lowerBound)) {
-      if (currentPosition.minus(roundedDown).gt(lowerBound)) {
+    if (currentPosition.minus(roundedUp).lt(lowerBound)) {
+      if (currentPosition.minus(roundedDown).lt(lowerBound)) {
         return { size: BN(0), side: "SELL" };
       } else {
         return { size: roundedDown, side: "SELL" };
