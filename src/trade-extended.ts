@@ -160,7 +160,6 @@ export const handler: Handler = async () => {
         : BigNumber(0),
     );
 
-    //TODO: finish post order
     if (size.gt(0)) {
       await createMarketOrder({ ticker, size, side });
     }
