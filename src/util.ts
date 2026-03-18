@@ -1,3 +1,5 @@
+import ky from "ky";
+import { Resource } from "sst";
 import { z } from "zod";
 
 export const clamp = (val: number, min: number, max: number) =>
@@ -32,51 +34,15 @@ export const generateNonce = () => {
 export const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const isRetryableError = (error: unknown): boolean => {
-  if (!error || typeof error !== "object") return false;
-
-  const err = error as {
-    message?: string;
-    cause?: { code?: string; name?: string };
-  };
-
-  const message = err.message?.toLowerCase() ?? "";
-  const causeCode = err.cause?.code;
-  const causeName = err.cause?.name;
-
-  return (
-    message.includes("econnrefused") ||
-    message.includes("etimedout") ||
-    message.includes("timeout") ||
-    message.includes("network") ||
-    causeCode === "ECONNREFUSED" ||
-    causeCode === "ETIMEDOUT" ||
-    causeName === "TimeoutError" ||
-    causeName === "AbortError"
+export async function sendTelegramMessage(message: string) {
+  ky.post(
+    `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
+    {
+      json: {
+        chat_id: Resource.TELEGRAM_ID.value,
+        text: message,
+        parse_mode: "HTML",
+      },
+    },
   );
-};
-
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  maxRetries = 3,
-  baseDelayMs = 1000,
-): Promise<T> {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (i === maxRetries - 1) {
-        console.error(`Failed after ${maxRetries} attempts:`, error);
-        throw error;
-      }
-
-      if (isRetryableError(error)) {
-        const delay = baseDelayMs * 2 ** i;
-        await sleep(delay);
-      } else {
-        throw error;
-      }
-    }
-  }
-  throw new Error("Unreachable");
 }

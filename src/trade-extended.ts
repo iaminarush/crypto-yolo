@@ -1,7 +1,5 @@
 import type { Handler } from "aws-lambda";
 import BigNumber from "bignumber.js";
-import ky from "ky";
-import { Resource } from "sst";
 import type { Database } from "../database.types.ts";
 import { getConfig, getTickers, getWeightsAndVolatilities } from "./api.ts";
 import { cancelOrder } from "./extended/api/cancel-order";
@@ -16,6 +14,7 @@ import { createMarketOrder } from "./extended/create-market-order.ts";
 import { init } from "./extended/init";
 import { Decimal } from "./extended/utils/number";
 import { roundToMinChange } from "./extended/utils/round-to-min-change.ts";
+import { sendTelegramMessage } from "./util.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
@@ -24,18 +23,9 @@ export const handler: Handler = async () => {
   await init();
   const startTime = Date.now();
 
-  const startMessage = `Extended Lambda Started!`;
-  ky.post(
-    `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
-    {
-      json: {
-        chat_id: Resource.TELEGRAM_ID.value,
-        text: startMessage,
-      },
-    },
-  ).catch(console.error);
+  await sendTelegramMessage("Extended Lambda Started").catch(console.error);
 
-  const config = await getConfig("hyperliquid");
+  const config = await getConfig("extended");
   const volAndWeight = await getWeightsAndVolatilities(config);
   const tickers = await getTickers();
   const currentPositions = await getPositions();
@@ -180,7 +170,24 @@ export const handler: Handler = async () => {
     })),
   };
 
-  await sendTelegramMessage(result).catch(console.error);
+  const runtimeSec = Math.floor(result.runtimeMs / 1000);
+  const minutes = Math.floor(runtimeSec / 60);
+  const seconds = runtimeSec % 60;
+
+  const status = result.success ? "Success" : "Failed";
+  const timeout = result.timedOut ? " (timed out)" : "";
+  const remainingList =
+    result.remainingTickers.length > 0
+      ? result.remainingTickers.join(", ")
+      : "None";
+
+  const message = `Extended Trading Complete!
+
+  ${status}${timeout}
+  Runtime: ${minutes}m ${seconds}s
+  Remaining: ${remainingList}`;
+
+  await sendTelegramMessage(message).catch(console.error);
 
   return result;
 };
@@ -347,34 +354,4 @@ type TradeResult = {
   runtimeMs: number;
   remainingTickers: string[];
   positions: { market: string; side: string; size: string; value: string }[];
-};
-
-const sendTelegramMessage = async (result: TradeResult) => {
-  const runtimeSec = Math.floor(result.runtimeMs / 1000);
-  const minutes = Math.floor(runtimeSec / 60);
-  const seconds = runtimeSec % 60;
-
-  const status = result.success ? "Success" : "Failed";
-  const timeout = result.timedOut ? " (timed out)" : "";
-  const remainingList =
-    result.remainingTickers.length > 0
-      ? result.remainingTickers.join(", ")
-      : "None";
-
-  const message = `Extended Trading Complete!
-
-${status}${timeout}
-Runtime: ${minutes}m ${seconds}s
-Remaining: ${remainingList}`;
-
-  await ky.post(
-    `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
-    {
-      json: {
-        chat_id: Resource.TELEGRAM_ID.value,
-        text: message,
-        parse_mode: "HTML",
-      },
-    },
-  );
 };
