@@ -89,7 +89,7 @@ export default $config({
     });
 
     new sst.aws.CronV2("TimestampCheck", {
-      schedule: "cron(5-30/2 9 * * ? *)",
+      schedule: "cron(5-30/5 9 * * ? *)",
       job: timestampChecker.arn,
       enabled: stage !== "dev",
     });
