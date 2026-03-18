@@ -157,6 +157,10 @@ export const handler: Handler = async () => {
 
   const finalPositions = await getPositions();
 
+  const tickersOutOfBuffer = Array.from(
+    filterTickersToRebalance(desiredPositions, finalPositions).values(),
+  );
+
   const result: TradeResult = {
     success: tickersToRebalance.size === 0,
     timedOut: Date.now() - startTime >= MAX_RUNTIME_MS,
