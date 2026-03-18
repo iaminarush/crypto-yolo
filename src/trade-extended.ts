@@ -159,7 +159,31 @@ export const handler: Handler = async () => {
 
   const tickersOutOfBuffer = Array.from(
     filterTickersToRebalance(desiredPositions, finalPositions).values(),
-  );
+  ).map((fr) => {
+    const position = finalPositions.find(
+      (fp) => fp.market === fr.extendedTicker,
+    );
+    const size = BigNumber(
+      position
+        ? position.side === "LONG"
+          ? position.size
+          : position.size.times(-1)
+        : 0,
+    );
+    const marketStats = markets.find(
+      (m) => m.assetName === fr.extendedTicker,
+    )?.marketStats;
+    const midPrice = marketStats
+      ? marketStats.askPrice.plus(marketStats.bidPrice).div(2)
+      : BigNumber(0);
+
+    const gapToLower = size.minus(fr.lowerBound).abs();
+    const gapToUpper = fr.upperBound.minus(size).abs();
+    const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
+    const priceGap = gap.times(midPrice).toNumber();
+
+    return { ...fr, size, priceGap };
+  });
 
   const result: TradeResult = {
     success: tickersToRebalance.size === 0,
@@ -184,12 +208,20 @@ export const handler: Handler = async () => {
     result.remainingTickers.length > 0
       ? result.remainingTickers.join(", ")
       : "None";
+  const outOfBoundsList =
+    tickersOutOfBuffer.length > 0
+      ? tickersOutOfBuffer
+          .map((t) => `${t.extendedTicker} $${t.priceGap}`)
+          .join(", ")
+      : "None";
 
-  const message = `Extended Trading Complete!
+  const message = `
+  Extended Trading Complete
 
   ${status}${timeout}
   Runtime: ${minutes}m ${seconds}s
-  Remaining: ${remainingList}`;
+  Remaining: ${remainingList}
+  Positions Out of Bounds: ${outOfBoundsList}`;
 
   await sendTelegramMessage(message).catch(console.error);
 
