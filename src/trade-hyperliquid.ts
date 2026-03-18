@@ -10,13 +10,13 @@ import { formatPrice, SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type { Handler } from "aws-lambda";
 import BN from "bignumber.js";
 import type { Database } from "database.types";
-import ky from "ky";
 import { Resource } from "sst";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getConfig, getTickers, getWeightsAndVolatilities } from "./api";
 import { SLIPPAGE } from "./constants";
 import { createLimitOrder } from "./hyperliquid/create-limit-order";
+import { sendTelegramMessage } from "./util";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
@@ -24,16 +24,7 @@ const MINIMUM_ORDER_VALUE = BN(10);
 
 export const handler: Handler = async () => {
   const startTime = Date.now();
-  const startMessage = `Hyperliquid Lambda Started!`;
-  ky.post(
-    `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
-    {
-      json: {
-        chat_id: Resource.TELEGRAM_ID.value,
-        text: startMessage,
-      },
-    },
-  ).catch(console.error);
+  sendTelegramMessage("Hyperliquid Lambda Started");
 
   const WALLET = Resource.HYPERLIQUID_WALLET.value as Hex;
   const transport = new HttpTransport();
@@ -93,39 +84,36 @@ export const handler: Handler = async () => {
         const book = await client.l2Book({ coin: ticker });
         const bestPrice = book?.levels[order.side === "B" ? 0 : 1]?.[0].px;
 
-        if (bestPrice && !BN(order.limitPx).eq(bestPrice)) {
-          try {
-            await exchange.cancel({
-              cancels: [
-                { a: converter.getAssetId(order.coin) || "", o: order.oid },
-              ],
-            });
-          } catch (error) {
-            console.error(
-              `Cancel failed for ${order.coin} ${order.oid}:`,
-              error,
-            );
-            continue;
-          }
+        if (bestPrice && BN(order.limitPx).eq(bestPrice)) continue;
 
-          const updatedPositions = await client.clearinghouseState({
-            user: WALLET,
+        try {
+          await exchange.cancel({
+            cancels: [
+              { a: converter.getAssetId(order.coin) || "", o: order.oid },
+            ],
           });
-          const currentPosition = updatedPositions.assetPositions.find(
-            (p) => p.position.coin === ticker,
-          );
+        } catch (error) {
+          console.error(`Cancel failed for ${order.coin} ${order.oid}:`, error);
+          continue;
+        }
 
-          const { size, side } = calculateOrderSize(
-            desiredPosition,
-            currentPosition ? BN(currentPosition.position.szi) : BN(0),
-            allMids,
-          );
+        const updatedPositions = await client.clearinghouseState({
+          user: WALLET,
+        });
+        const currentPosition = updatedPositions.assetPositions.find(
+          (p) => p.position.coin === ticker,
+        );
 
-          if (size.gt(0)) {
-            await createLimitOrder({ ticker, size, side });
-          } else {
-            tickersToRebalance.delete(ticker);
-          }
+        const { size, side } = calculateOrderSize(
+          desiredPosition,
+          currentPosition ? BN(currentPosition.position.szi) : BN(0),
+          allMids,
+        );
+
+        if (size.gt(0)) {
+          await createLimitOrder({ ticker, size, side });
+        } else {
+          tickersToRebalance.delete(ticker);
         }
       }
       await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
@@ -177,6 +165,36 @@ export const handler: Handler = async () => {
     }
   }
 
+  const { assetPositions: finalPositions } = await client.clearinghouseState({
+    user: WALLET,
+  });
+
+  const allMids = await client.allMids();
+
+  const tickersOutOfBuffer = Array.from(
+    filterTickersToRebalance(desiredPositions, finalPositions).values(),
+  ).map((fr) => {
+    const position = finalPositions.find(
+      (fp) => fp.position.coin === fr.exchangeTicker,
+    )?.position;
+
+    const size = BN(position?.szi || 0);
+    const midPrice = allMids[fr.exchangeTicker];
+
+    const gapToLower = size.minus(fr.lowerBound).abs();
+    const gapToUpper = fr.upperBound.minus(size).abs();
+    const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
+    const priceGap = gap.times(midPrice).toNumber();
+
+    return {
+      ...fr,
+      size:
+        finalPositions.find((fp) => fp.position.coin === fr.exchangeTicker)
+          ?.position.szi || "0",
+      priceGap,
+    };
+  });
+
   const runtimeMs = Date.now() - startTime;
   const timedOut = runtimeMs >= MAX_RUNTIME_MS;
   const minutes = Math.floor(runtimeMs / 60000);
@@ -188,25 +206,25 @@ export const handler: Handler = async () => {
     tickersToRebalance.size > 0
       ? Array.from(tickersToRebalance.keys()).join(", ")
       : "None";
+  const outOfBoundsList =
+    tickersOutOfBuffer.length > 0
+      ? tickersOutOfBuffer
+          .map((t) => `${t.exchangeTicker} $${t.priceGap}`)
+          .join(", ")
+      : "None";
 
-  const message = `Hyperliquid Trading Complete!
+  const message = `
+  Hyperliquid Trading Complete
 
-${status}${timeout}
-Runtime: ${minutes}m ${seconds}s
-Remaining: ${remainingList}`;
+  ${status}${timeout}
+  Runtime: ${minutes}m ${seconds}s
+  Remaining: ${remainingList}
+  Positions Out of Bounds: ${outOfBoundsList}
+  `;
 
-  await ky
-    .post(
-      `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
-      {
-        json: {
-          chat_id: Resource.TELEGRAM_ID.value,
-          text: message,
-          parse_mode: "HTML",
-        },
-      },
-    )
-    .catch(console.error);
+  await sendTelegramMessage(message).catch(console.error);
+
+  return { finalPositions, tickersOutOfBuffer };
 };
 
 const calculateDesiredPositions = (
