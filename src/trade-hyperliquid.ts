@@ -18,7 +18,7 @@ import { SLIPPAGE } from "./constants";
 import { createLimitOrder } from "./hyperliquid/create-limit-order";
 import { sendTelegramMessage } from "./util";
 
-const SLEEP_MS = 1000;
+const SLEEP_MS = 1500;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 const MINIMUM_ORDER_VALUE = BN(10);
 
@@ -186,13 +186,7 @@ export const handler: Handler = async () => {
     const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
     const priceGap = gap.times(midPrice).toNumber();
 
-    return {
-      ...fr,
-      size:
-        finalPositions.find((fp) => fp.position.coin === fr.exchangeTicker)
-          ?.position.szi || "0",
-      priceGap,
-    };
+    return { ...fr, size, priceGap };
   });
 
   const runtimeMs = Date.now() - startTime;
@@ -219,8 +213,7 @@ export const handler: Handler = async () => {
   ${status}${timeout}
   Runtime: ${minutes}m ${seconds}s
   Remaining: ${remainingList}
-  Positions Out of Bounds: ${outOfBoundsList}
-  `;
+  Positions Out of Bounds: ${outOfBoundsList}`;
 
   await sendTelegramMessage(message).catch(console.error);
 
