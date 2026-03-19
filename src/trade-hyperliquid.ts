@@ -58,6 +58,7 @@ export const handler: Handler = async () => {
     tickersToRebalance.size > 0
   ) {
     const allMids = await client.allMids();
+    await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
     for (const [ticker, desiredPosition] of tickersToRebalance) {
       const order = await getOpenOrder(client, ticker);
 
@@ -116,7 +117,6 @@ export const handler: Handler = async () => {
           tickersToRebalance.delete(ticker);
         }
       }
-      await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
     }
   }
 
