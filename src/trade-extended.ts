@@ -226,12 +226,12 @@ export const handler: Handler = async () => {
   Remaining: ${remainingList}
   Positions Out of Bounds: ${outOfBoundsList}`;
 
-    await sendTelegramMessage(message).catch(console.error);
+    await sendTelegramMessage(message);
 
     return result;
   } catch (error) {
     console.error("Lambda error:", error);
-    await sendTelegramMessage(`Lambda error: ${error}`).catch(console.error);
+    await sendTelegramMessage(`Lambda error: ${error}`);
     throw error;
   }
 };

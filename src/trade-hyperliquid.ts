@@ -215,7 +215,7 @@ export const handler: Handler = async () => {
   Remaining: ${remainingList}
   Positions Out of Bounds: ${outOfBoundsList}`;
 
-  await sendTelegramMessage(message).catch(console.error);
+  await sendTelegramMessage(message);
 
   return { finalPositions, tickersOutOfBuffer };
 };
