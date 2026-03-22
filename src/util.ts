@@ -35,7 +35,7 @@ export const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function sendTelegramMessage(message: string) {
-  ky.post(
+  await ky.post(
     `https://api.telegram.org/bot${Resource.TELEGRAM_TOKEN.value}/sendMessage`,
     {
       json: {
