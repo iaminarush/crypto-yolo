@@ -1,0 +1,16 @@
+meta {
+  name: Get Balance
+  type: http
+  seq: 9
+}
+
+get {
+  url: https://api.starknet.extended.exchange/api/v1/user/balance
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
