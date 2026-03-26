@@ -15,6 +15,7 @@ import { init } from "./extended/init";
 import { Decimal } from "./extended/utils/number";
 import { roundToMinChange } from "./extended/utils/round-to-min-change.ts";
 import { sendTelegramMessage } from "./util.ts";
+import { getBalance } from "./extended/api/balance.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
@@ -201,6 +202,8 @@ export const handler: Handler = async () => {
       })),
     };
 
+    const balance = await getBalance();
+
     const runtimeSec = Math.floor(result.runtimeMs / 1000);
     const minutes = Math.floor(runtimeSec / 60);
     const seconds = runtimeSec % 60;
@@ -224,7 +227,8 @@ export const handler: Handler = async () => {
   ${status}${timeout}
   Runtime: ${minutes}m ${seconds}s
   Remaining: ${remainingList}
-  Positions Out of Bounds: ${outOfBoundsList}`;
+  Positions Out of Bounds: ${outOfBoundsList}
+  Leverage: ${balance.leverage.decimalPlaces(2, BigNumber.ROUND_HALF_UP)}`;
 
     await sendTelegramMessage(message);
 

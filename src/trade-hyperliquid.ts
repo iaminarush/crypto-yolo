@@ -165,9 +165,10 @@ export const handler: Handler = async () => {
     }
   }
 
-  const { assetPositions: finalPositions } = await client.clearinghouseState({
-    user: WALLET,
-  });
+  const { assetPositions: finalPositions, crossMarginSummary } =
+    await client.clearinghouseState({
+      user: WALLET,
+    });
 
   const allMids = await client.allMids();
 
@@ -207,13 +208,18 @@ export const handler: Handler = async () => {
           .join(", ")
       : "None";
 
+  const leverage = BN(crossMarginSummary.totalNtlPos)
+    .dividedBy(crossMarginSummary.accountValue)
+    .decimalPlaces(2, BN.ROUND_HALF_UP);
+
   const message = `
   Hyperliquid Trading Complete
 
   ${status}${timeout}
   Runtime: ${minutes}m ${seconds}s
   Remaining: ${remainingList}
-  Positions Out of Bounds: ${outOfBoundsList}`;
+  Positions Out of Bounds: ${outOfBoundsList}
+  Leverage: ${leverage}`;
 
   await sendTelegramMessage(message);
 
