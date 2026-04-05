@@ -2,6 +2,7 @@ import type { Handler } from "aws-lambda";
 import BigNumber from "bignumber.js";
 import type { Database } from "../database.types.ts";
 import { getConfig, getTickers, getWeightsAndVolatilities } from "./api.ts";
+import { getBalance } from "./extended/api/balance.ts";
 import { cancelOrder } from "./extended/api/cancel-order";
 import type { Market } from "./extended/api/markets.schema.ts";
 import { getMarkets } from "./extended/api/markets.ts";
@@ -15,7 +16,6 @@ import { init } from "./extended/init";
 import { Decimal } from "./extended/utils/number";
 import { roundToMinChange } from "./extended/utils/round-to-min-change.ts";
 import { sendTelegramMessage } from "./util.ts";
-import { getBalance } from "./extended/api/balance.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
