@@ -2,10 +2,7 @@
   "version": "1",
   "name": "extended-yolo",
   "type": "collection",
-  "ignore": [
-    "node_modules",
-    ".git"
-  ],
+  "ignore": ["node_modules", ".git"],
   "size": 0,
   "filesCount": 0,
   "presets": {
