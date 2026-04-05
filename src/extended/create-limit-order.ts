@@ -58,8 +58,6 @@ export const createLimitOrder = async ({
   const fees = await getFees({ marketName: ticker });
   const starknetDomain = await getStarknetDomain();
 
-  let retryCount = 0;
-
   while (true) {
     try {
       const orderbook = await getOrderbook(ticker);
@@ -97,19 +95,9 @@ export const createLimitOrder = async ({
 
       const result = await placeOrder({ order });
 
-      if (retryCount > 0) {
-        console.log(
-          `Order for ${ticker} succeeded after ${retryCount} retries`,
-        );
-      }
-
       return { status: "success", id: result.id.toString() };
     } catch (error) {
       if (isPriceInvalidError(error)) {
-        retryCount++;
-        console.warn(
-          `Price invalid for ${ticker}, retrying (attempt ${retryCount})...`,
-        );
         await sleep(getRandomDelay());
         continue;
       }
