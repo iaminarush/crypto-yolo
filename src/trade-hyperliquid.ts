@@ -18,7 +18,7 @@ import { SLIPPAGE } from "./constants";
 import { createLimitOrder } from "./hyperliquid/create-limit-order";
 import { sendTelegramMessage } from "./util";
 
-const SLEEP_MS = 1500;
+const SLEEP_MS = 1750;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 const MINIMUM_ORDER_VALUE = BN(10);
 
