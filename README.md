@@ -1,4 +1,4 @@
-# Extended YOLO Crypto Trading Bot
+# Robot Wealth YOLO factors Crypto Trading
 
 ## Prerequisites
 
