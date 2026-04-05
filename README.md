@@ -45,7 +45,7 @@ pnpm sst secret set TELEGRAM_TOKEN <bot_token>
 pnpm sst secret set TELEGRAM_ID <chat_id>
 ```
 
-### 4. Development
+### 3. Development
 
 Start the SST development console to run your functions locally and live-lambda debug:
 
