@@ -303,11 +303,11 @@ const calculateOrderSize = (
   if (currentPosition.lt(desiredPosition.lowerBound)) {
     const gap = desiredPosition.lowerBound.minus(currentPosition);
 
-    let size = gap.lt(desiredPosition.minOrdersize)
+    const size = gap.lt(desiredPosition.minOrdersize)
       ? desiredPosition.minOrdersize
       : gap;
 
-    size = roundToMinChange(
+    const roundedUp = roundToMinChange(
       size,
       desiredPosition.minOrdersizeChange,
       Decimal.ROUND_UP,
@@ -319,15 +319,13 @@ const calculateOrderSize = (
       Decimal.ROUND_DOWN,
     );
 
-    if (currentPosition.plus(size).gt(desiredPosition.upperBound)) {
-      if (currentPosition.plus(roundedDown).gt(desiredPosition.upperBound)) {
-        size = BigNumber(0);
-      } else {
-        size = roundedDown;
-      }
-    }
+    if (currentPosition.plus(roundedUp).lt(desiredPosition.upperBound))
+      return { size: roundedUp, side: "BUY" };
 
-    return { size, side: "BUY" };
+    if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
+      return { size: roundedDown, side: "BUY" };
+
+    return { size: BigNumber(0), side: "BUY" };
   }
 
   if (currentPosition.gt(desiredPosition.upperBound)) {
@@ -335,11 +333,11 @@ const calculateOrderSize = (
       .minus(currentPosition)
       .absoluteValue();
 
-    let size = gap.lt(desiredPosition.minOrdersize)
+    const size = gap.lt(desiredPosition.minOrdersize)
       ? desiredPosition.minOrdersize
       : gap;
 
-    size = roundToMinChange(
+    const roundedUp = roundToMinChange(
       size,
       desiredPosition.minOrdersizeChange,
       Decimal.ROUND_UP,
@@ -351,15 +349,13 @@ const calculateOrderSize = (
       Decimal.ROUND_DOWN,
     );
 
-    if (currentPosition.minus(size).lt(desiredPosition.lowerBound)) {
-      if (currentPosition.minus(roundedDown).lt(desiredPosition.lowerBound)) {
-        size = BigNumber(0);
-      } else {
-        size = roundedDown;
-      }
-    }
+    if (currentPosition.plus(roundedUp).gt(desiredPosition.lowerBound))
+      return { size: roundedUp, side: "SELL" };
 
-    return { size, side: "SELL" };
+    if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
+      return { size: roundedDown, side: "SELL" };
+
+    return { size: BigNumber(0), side: "SELL" };
   }
 
   return { size: BigNumber(0), side: "BUY" };

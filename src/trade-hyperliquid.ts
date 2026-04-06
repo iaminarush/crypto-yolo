@@ -322,15 +322,13 @@ function calculateOrderSize(
     const roundedUp = roundToDecimal(size, szDecimals, BN.ROUND_UP);
     const roundedDown = roundToDecimal(size, szDecimals, BN.ROUND_DOWN);
 
-    if (currentPosition.plus(roundedUp).gt(upperBound)) {
-      if (currentPosition.plus(roundedDown).gt(upperBound)) {
-        return { size: BN(0), side: "BUY" };
-      } else {
-        return { size: roundedDown, side: "BUY" };
-      }
-    }
+    if (currentPosition.plus(roundedUp).lt(desiredPosition.upperBound))
+      return { size: roundedUp, side: "BUY" };
 
-    return { size: roundedUp, side: "BUY" };
+    if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
+      return { size: roundedDown, side: "BUY" };
+
+    return { size: BigNumber(0), side: "BUY" };
   }
 
   if (currentPosition.gt(desiredPosition.upperBound)) {
@@ -343,15 +341,13 @@ function calculateOrderSize(
     const roundedUp = roundToDecimal(size, szDecimals, BN.ROUND_UP);
     const roundedDown = roundToDecimal(size, szDecimals, BN.ROUND_DOWN);
 
-    if (currentPosition.minus(roundedUp).lt(lowerBound)) {
-      if (currentPosition.minus(roundedDown).lt(lowerBound)) {
-        return { size: BN(0), side: "SELL" };
-      } else {
-        return { size: roundedDown, side: "SELL" };
-      }
-    }
+    if (currentPosition.plus(roundedUp).gt(desiredPosition.lowerBound))
+      return { size: roundedUp, side: "SELL" };
 
-    return { size: roundedUp, side: "SELL" };
+    if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
+      return { size: roundedDown, side: "SELL" };
+
+    return { size: BigNumber(0), side: "SELL" };
   }
 
   return { size: BN(0), side: "BUY" };
