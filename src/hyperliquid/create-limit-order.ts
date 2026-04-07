@@ -10,8 +10,8 @@ import { Resource } from "sst";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-const MIN_RETRY_DELAY_MS = 1000;
-const MAX_RETRY_DELAY_MS = 2000;
+const MIN_RETRY_DELAY_MS = 1500;
+const MAX_RETRY_DELAY_MS = 2500;
 
 const getRandomDelay = () =>
   Math.floor(Math.random() * (MAX_RETRY_DELAY_MS - MIN_RETRY_DELAY_MS + 1)) +
