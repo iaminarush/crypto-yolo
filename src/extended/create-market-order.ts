@@ -46,7 +46,7 @@ export const createMarketOrder = async ({
       side === "BUY"
         ? market.marketStats.askPrice.times(Decimal(1).plus(SLIPPAGE))
         : market.marketStats.bidPrice.times(Decimal(1).minus(SLIPPAGE)),
-      market.tradingConfig.minOrderSizeChange,
+      market.tradingConfig.minPriceChange,
       Decimal.ROUND_DOWN,
     ),
     timeInForce: "IOC",
