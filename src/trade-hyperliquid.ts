@@ -18,7 +18,7 @@ import { SLIPPAGE } from "./constants";
 import { createLimitOrder } from "./hyperliquid/create-limit-order";
 import { sendTelegramMessage } from "./util";
 
-const SLEEP_MS = 1750;
+const SLEEP_MS = 2250;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 const MINIMUM_ORDER_VALUE = BN(10);
 
@@ -57,16 +57,15 @@ export const handler: Handler = async () => {
     Date.now() - startTime < MAX_RUNTIME_MS &&
     tickersToRebalance.size > 0
   ) {
-    const allMids = await client.allMids();
     await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
+    const allMids = await client.allMids();
+    const orders = await getOpenOrders(client);
+    const { assetPositions: updatedPositions } =
+      await client.clearinghouseState({ user: WALLET });
     for (const [ticker, desiredPosition] of tickersToRebalance) {
-      const order = await getOpenOrder(client, ticker);
+      const order = orders.find((o) => o.coin === ticker);
 
       if (!order) {
-        const { assetPositions: updatedPositions } =
-          await client.clearinghouseState({
-            user: WALLET,
-          });
         const currentPosition = updatedPositions.find(
           (p) => p.position.coin === ticker,
         );
@@ -77,7 +76,14 @@ export const handler: Handler = async () => {
         );
 
         if (size.gt(0)) {
-          await createLimitOrder({ ticker, size, side });
+          await createLimitOrder({
+            ticker,
+            size,
+            side,
+            converter,
+            client,
+            exchange,
+          });
         } else {
           tickersToRebalance.delete(ticker);
         }
@@ -98,10 +104,7 @@ export const handler: Handler = async () => {
           continue;
         }
 
-        const updatedPositions = await client.clearinghouseState({
-          user: WALLET,
-        });
-        const currentPosition = updatedPositions.assetPositions.find(
+        const currentPosition = updatedPositions.find(
           (p) => p.position.coin === ticker,
         );
 
@@ -112,7 +115,14 @@ export const handler: Handler = async () => {
         );
 
         if (size.gt(0)) {
-          await createLimitOrder({ ticker, size, side });
+          await createLimitOrder({
+            ticker,
+            size,
+            side,
+            converter,
+            client,
+            exchange,
+          });
         } else {
           tickersToRebalance.delete(ticker);
         }
@@ -365,15 +375,14 @@ function roundToDecimal(
   return value.decimalPlaces(szDecimals, roundingMode);
 }
 
-async function getOpenOrder(
+async function getOpenOrders(
   client: InfoClient<{
     transport: HttpTransport;
   }>,
-  ticker: string,
 ) {
-  const orders = await client.openOrders({
+  return await client.openOrders({
     user: Resource.HYPERLIQUID_WALLET.value,
   });
 
-  return orders.find((o) => o.coin === ticker);
+  // return orders.find((o) => o.coin === ticker);
 }

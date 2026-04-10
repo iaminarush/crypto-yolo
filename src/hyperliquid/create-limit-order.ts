@@ -1,14 +1,10 @@
 import {
   ApiRequestError,
-  ExchangeClient,
-  HttpTransport,
-  InfoClient,
+  type ExchangeClient,
+  type InfoClient,
 } from "@nktkas/hyperliquid";
-import { formatPrice, SymbolConverter } from "@nktkas/hyperliquid/utils";
+import { formatPrice, type SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type BigNumber from "bignumber.js";
-import { Resource } from "sst";
-import type { Hex } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
 
 const MIN_RETRY_DELAY_MS = 1500;
 const MAX_RETRY_DELAY_MS = 2500;
@@ -23,18 +19,18 @@ export const createLimitOrder = async ({
   ticker,
   size,
   side,
+  converter,
+  client,
+  exchange,
 }: {
   ticker: string;
   size: BigNumber;
   side: "BUY" | "SELL";
+  converter: SymbolConverter;
+  client: InfoClient;
+  exchange: ExchangeClient;
 }) => {
-  const wallet = privateKeyToAccount(Resource.HYPERLIQUID_KEY.value as Hex);
   const isBuy = side === "BUY";
-
-  const transport = new HttpTransport();
-  const converter = await SymbolConverter.create({ transport });
-  const info = new InfoClient({ transport });
-  const exchange = new ExchangeClient({ transport, wallet });
 
   const assetId = converter.getAssetId(ticker);
   const szDecimals = converter.getSzDecimals(ticker);
@@ -43,7 +39,7 @@ export const createLimitOrder = async ({
     return { status: "skipped", reason: "AssetId or szDecimals not found" };
 
   while (true) {
-    const book = await info.l2Book({ coin: ticker });
+    const book = await client.l2Book({ coin: ticker });
 
     const price = book?.levels[isBuy ? 0 : 1]?.[0].px;
 
