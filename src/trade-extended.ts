@@ -161,6 +161,8 @@ export const handler: Handler = async () => {
 
     const finalPositions = await getPositions();
 
+    console.log(finalPositions);
+
     const tickersOutOfBuffer = Array.from(
       filterTickersToRebalance(desiredPositions, finalPositions).values(),
     ).map((fr) => {
