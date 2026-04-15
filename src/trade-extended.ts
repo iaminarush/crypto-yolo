@@ -161,8 +161,6 @@ export const handler: Handler = async () => {
 
     const finalPositions = await getPositions();
 
-    console.log(finalPositions);
-
     const tickersOutOfBuffer = Array.from(
       filterTickersToRebalance(desiredPositions, finalPositions).values(),
     ).map((fr) => {
@@ -176,6 +174,7 @@ export const handler: Handler = async () => {
             : position.size.times(-1)
           : 0,
       );
+
       const marketStats = markets.find(
         (m) => m.assetName === fr.extendedTicker,
       )?.marketStats;
@@ -190,6 +189,8 @@ export const handler: Handler = async () => {
 
       return { ...fr, size, priceGap };
     });
+
+    console.log(tickersOutOfBuffer);
 
     const result: TradeResult = {
       success: tickersToRebalance.size === 0,
