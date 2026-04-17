@@ -185,6 +185,9 @@ export const handler: Handler = async () => {
       const gapToLower = size.minus(fr.lowerBound).abs();
       const gapToUpper = fr.upperBound.minus(size).abs();
       const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
+
+      console.log(midPrice, gap);
+
       const priceGap = gap.times(midPrice).toNumber();
 
       return { ...fr, size, priceGap };
