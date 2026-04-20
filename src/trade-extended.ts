@@ -176,7 +176,7 @@ export const handler: Handler = async () => {
       );
 
       const marketStats = markets.find(
-        (m) => m.assetName === fr.extendedTicker,
+        (m) => m.name === fr.extendedTicker,
       )?.marketStats;
       const midPrice = marketStats
         ? marketStats.askPrice.plus(marketStats.bidPrice).div(2)
