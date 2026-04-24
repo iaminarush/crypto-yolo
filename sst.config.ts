@@ -51,6 +51,7 @@ export default $config({
       ],
       timeout: "15 minutes",
       runtime: "nodejs24.x",
+      nodejs: { install: ["@x10xchange/stark-crypto-wrapper-wasm"] },
     });
 
     const hyperliquidWorker = new sst.aws.Function("tradeHyperliquid", {
