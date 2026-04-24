@@ -161,6 +161,8 @@ export const handler: Handler = async () => {
 
     const finalPositions = await getPositions();
 
+    console.log(finalPositions);
+
     const tickersOutOfBuffer = Array.from(
       filterTickersToRebalance(desiredPositions, finalPositions).values(),
     ).map((fr) => {
@@ -186,7 +188,7 @@ export const handler: Handler = async () => {
       const gapToUpper = fr.upperBound.minus(size).abs();
       const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
 
-      console.log(midPrice, gap);
+      console.log(size, midPrice, gap);
 
       const priceGap = gap.times(midPrice).toNumber();
 
