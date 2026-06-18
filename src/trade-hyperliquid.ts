@@ -218,8 +218,11 @@ export const handler: Handler = async () => {
           .join(", ")
       : "None";
 
+  const { balances } = await client.spotClearinghouseState({ user: WALLET });
+  const usdcTotal = balances.find((b) => b.coin === "USDC")?.total || 1;
+
   const leverage = BN(crossMarginSummary.totalNtlPos)
-    .dividedBy(crossMarginSummary.accountValue)
+    .dividedBy(usdcTotal)
     .decimalPlaces(2, BN.ROUND_HALF_UP);
 
   const message = `
