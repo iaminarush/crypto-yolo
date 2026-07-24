@@ -68,6 +68,13 @@ export default $config({
       runtime: "nodejs24.x",
     });
 
+    const risexWorker = new sst.aws.Function("tradeRisex", {
+      handler: "src/trade-risex.handler",
+      link: [rwKey, supabaseKey],
+      timeout: "15 minutes",
+      runtime: "nodejs24.x",
+    });
+
     new aws.cloudwatch.MetricAlarm("WorkerErrorAlarm", {
       comparisonOperator: "GreaterThanOrEqualToThreshold",
       evaluationPeriods: 1,

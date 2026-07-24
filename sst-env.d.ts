@@ -62,6 +62,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "tradeRisex": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
   }
 }
 /// <reference path="sst-env.d.ts" />
