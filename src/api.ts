@@ -138,7 +138,7 @@ const getVolatilities = async () =>
     VolSchema,
   );
 
-export type TExchangeNames = "extended" | "hyperliquid";
+export type TExchangeNames = "extended" | "hyperliquid" | "risex";
 
 export const getTickers = async () => {
   const { data } = await supabase.from("ticker").select();
