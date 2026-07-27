@@ -1,1 +1,4 @@
+allowBuilds:
+  aws-sdk: true
+  esbuild: true
 minimumReleaseAge: 10080
