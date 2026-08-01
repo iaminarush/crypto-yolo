@@ -87,6 +87,16 @@ export const getWeightsAndVolatilities = async (config: TConfig) => {
     });
 };
 
+export const getDemeanedWeightsAndVols = async (
+  config: TConfig,
+  universe: string[],
+) => {
+  const weights = await getWeights();
+  const volatilities = await getVolatilities();
+  let totalVol = new BigNumber(0);
+  const rbwTickers = weights.data.map((w) => w.ticker);
+};
+
 const Weight = z.object({
   ticker: z.string(),
   arrival_price: z.number(),
@@ -102,7 +112,7 @@ const WeightsSchema = z.object({
   data: z.array(Weight),
 });
 
-const getWeights = async () =>
+export const getWeights = async () =>
   fetchAndParse(
     () =>
       ky
