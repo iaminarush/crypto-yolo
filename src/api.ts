@@ -94,7 +94,61 @@ export const getDemeanedWeightsAndVols = async (
   const weights = await getWeights();
   const volatilities = await getVolatilities();
   let totalVol = new BigNumber(0);
-  const rbwTickers = weights.data.map((w) => w.ticker);
+
+  // const filteredWeights = weights.data.filter((w) =>
+  //   ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"].includes(w.ticker),
+  // );
+
+  const filteredWeights = weights.data.filter((w) =>
+    universe.includes(w.ticker),
+  );
+
+  const averageMomentum =
+    filteredWeights.reduce((sum, v) => sum + v.momentum_megafactor, 0) /
+    filteredWeights.length;
+
+  const absSumMomentum = filteredWeights.reduce(
+    (sum, v) => sum.plus(Math.abs(v.momentum_megafactor)),
+    BigNumber(0),
+  );
+
+  const averageCarry =
+    filteredWeights.reduce((sum, v) => sum + v.carry_megafactor, 0) /
+    filteredWeights.length;
+
+  const absSumCarry = filteredWeights.reduce(
+    (sum, v) => sum.plus(Math.abs(v.carry_megafactor)),
+    BigNumber(0),
+  );
+
+  const merged = weights.data.map((w) => {
+    const vol = volatilities.data.find((v) => v.ticker === w.ticker);
+    if (!vol)
+      throw new Error("Non matching ticker between weights and volatilities");
+
+    if (vol.ewvol <= 0)
+      throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
+
+    const inverseVol = new BigNumber(1).div(vol.ewvol);
+    const comboWeight = new BigNumber(w.trend_megafactor)
+      .times(config.trend_weight)
+      .plus(new BigNumber(w.momentum_megafactor).times(config.momentum_weight))
+      .plus(new BigNumber(w.carry_megafactor).times(config.carry_weight));
+
+    const volScaledWeight = BigNumber(
+      clamp(inverseVol.times(comboWeight).toNumber(), -0.25, 0.25),
+    );
+
+    totalVol = totalVol.plus(Math.abs(volScaledWeight.toNumber()));
+
+    return {
+      ...w,
+      ewvol: vol.ewvol,
+      inverseVol,
+      combo_weight: comboWeight,
+      vol_scaled_weight: volScaledWeight,
+    };
+  });
 };
 
 const Weight = z.object({

@@ -44,12 +44,4 @@ const calculateDesiredPositions = (
       .filter((t) => markets.some((m) => m.market_id === t.risex_ticker))
       .map((t) => [t.rbw_ticker, t.risex_ticker]),
   );
-
-  // const averageMomentum =
-  //   volAndWeight.reduce((sum, v) => sum + v.momentum_megafactor, 0) /
-  //   volAndWeight.length;
-  //
-  // const averageCarry =
-  //   volAndWeight.reduce((sum, v) => sum + v.carry_megafactor, 0) /
-  //   volAndWeight.length;
 };
