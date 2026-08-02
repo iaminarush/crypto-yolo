@@ -95,13 +95,13 @@ export const getDemeanedWeightsAndVols = async (
   const volatilities = await getVolatilities();
   let totalVol = new BigNumber(0);
 
-  // const filteredWeights = weights.data.filter((w) =>
-  //   ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"].includes(w.ticker),
-  // );
-
   const filteredWeights = weights.data.filter((w) =>
-    universe.includes(w.ticker),
+    ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"].includes(w.ticker),
   );
+
+  // const filteredWeights = weights.data.filter((w) =>
+  //   universe.includes(w.ticker),
+  // );
 
   const averageMomentum =
     filteredWeights.reduce((sum, v) => sum + v.momentum_megafactor, 0) /
@@ -121,7 +121,7 @@ export const getDemeanedWeightsAndVols = async (
     BigNumber(0),
   );
 
-  const merged = weights.data.map((w) => {
+  const merged = filteredWeights.map((w) => {
     const vol = volatilities.data.find((v) => v.ticker === w.ticker);
     if (!vol)
       throw new Error("Non matching ticker between weights and volatilities");
@@ -129,25 +129,17 @@ export const getDemeanedWeightsAndVols = async (
     if (vol.ewvol <= 0)
       throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
 
-    const inverseVol = new BigNumber(1).div(vol.ewvol);
-    const comboWeight = new BigNumber(w.trend_megafactor)
-      .times(config.trend_weight)
-      .plus(new BigNumber(w.momentum_megafactor).times(config.momentum_weight))
-      .plus(new BigNumber(w.carry_megafactor).times(config.carry_weight));
+    const demeanedMomo = BigNumber(w.momentum_megafactor)
+      .minus(averageMomentum)
+      .div(absSumMomentum);
 
-    const volScaledWeight = BigNumber(
-      clamp(inverseVol.times(comboWeight).toNumber(), -0.25, 0.25),
-    );
+    const demeanedCarry = BigNumber(w.carry_megafactor)
+      .minus(averageCarry)
+      .div(absSumCarry);
 
-    totalVol = totalVol.plus(Math.abs(volScaledWeight.toNumber()));
-
-    return {
-      ...w,
-      ewvol: vol.ewvol,
-      inverseVol,
-      combo_weight: comboWeight,
-      vol_scaled_weight: volScaledWeight,
-    };
+    const adjustedTrend = BigNumber(w.trend_megafactor)
+      .times(10)
+      .div(filteredWeights.length);
   });
 };
 
