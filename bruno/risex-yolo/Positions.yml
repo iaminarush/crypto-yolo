@@ -5,10 +5,10 @@ info:
 
 http:
   method: GET
-  url: https://api.rise.trade/v1/positions?account=0xA5c0DECC9335DB5EB3f7c895601d280517319814
+  url: https://api.rise.trade/v1/positions?account=0x9E5bC0f8f01C841d8c1dD3443a7de211ACa9B8B0
   params:
     - name: account
-      value: "0xA5c0DECC9335DB5EB3f7c895601d280517319814"
+      value: "0x9E5bC0f8f01C841d8c1dD3443a7de211ACa9B8B0"
       type: query
   auth: inherit
 
