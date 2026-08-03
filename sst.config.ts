@@ -17,10 +17,11 @@ export default $config({
   async run() {
     const rwKey = new sst.Secret("ROBOTWEALTH_KEY");
     const supabaseKey = new sst.Secret("SUPABASE_KEY");
-    const extendedApiKey = new sst.Secret("EXTENDED_API_KEY");
-    const extendedStarkexKey = new sst.Secret("EXTENDED_STARKEX_KEY");
     const telegramToken = new sst.Secret("TELEGRAM_TOKEN");
     const telegramId = new sst.Secret("TELEGRAM_ID");
+
+    const extendedApiKey = new sst.Secret("EXTENDED_API_KEY");
+    const extendedStarkexKey = new sst.Secret("EXTENDED_STARKEX_KEY");
     const extendedLambdaKey = new sst.Secret("EXTENDED_LAMBDA_KEY");
 
     const hyperliquidWallet = new sst.Secret("HYPERLIQUID_WALLET");
@@ -70,7 +71,7 @@ export default $config({
 
     const risexWorker = new sst.aws.Function("tradeRisex", {
       handler: "src/trade-risex.handler",
-      link: [rwKey, supabaseKey],
+      link: [rwKey, supabaseKey, hyperliquidWallet],
       timeout: "15 minutes",
       runtime: "nodejs24.x",
     });
