@@ -1,7 +1,12 @@
 import type { Handler } from "aws-lambda";
 import BN from "bignumber.js";
 import type { Database } from "database.types";
-import { InfoClient, type Market } from "risex-client";
+import {
+  InfoClient,
+  type Market,
+  type Position,
+  formatWad,
+} from "risex-client";
 import {
   getConfig,
   getDemeanedWeightsAndVols,
@@ -39,7 +44,7 @@ export const handler: Handler = async () => {
 
   const tickersToRebalance = filterTickersToRebalance(
     desiredPositions,
-    assetPositions,
+    positions,
   );
 };
 
@@ -80,4 +85,17 @@ const calculateDesiredPositions = (
       szDecimals: market.config.step_size,
     };
   });
+};
+
+type TDesiredPosition = ReturnType<typeof calculateDesiredPositions>[number];
+
+const filterTickersToRebalance = (
+  desiredPositions: TDesiredPosition[],
+  currentPositions: Position[],
+) => {
+  const positionMap = new Map(
+    currentPositions.map((p) => [p.market_id, BN(formatWad(p.size))]),
+  );
+
+  const result = new Map<string, TDesiredPosition>();
 };
