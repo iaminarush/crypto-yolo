@@ -1,0 +1,19 @@
+info:
+  name: Positions
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: https://api.rise.trade/v1/positions?account=0xA5c0DECC9335DB5EB3f7c895601d280517319814
+  params:
+    - name: account
+      value: "0xA5c0DECC9335DB5EB3f7c895601d280517319814"
+      type: query
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
