@@ -30,6 +30,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "RISEX_API_KEY": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "ROBOTWEALTH_KEY": {
       "type": "sst.sst.Secret"
       "value": string

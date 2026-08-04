@@ -27,6 +27,8 @@ export default $config({
     const hyperliquidWallet = new sst.Secret("HYPERLIQUID_WALLET");
     const hyperliquidKey = new sst.Secret("HYPERLIQUID_KEY");
 
+    const risexApiKey = new sst.Secret("RISEX_API_KEY");
+
     const errorTopic = new sst.aws.SnsTopic("FailureTopic");
 
     const stage = $app.stage;
@@ -71,7 +73,14 @@ export default $config({
 
     const risexWorker = new sst.aws.Function("tradeRisex", {
       handler: "src/trade-risex.handler",
-      link: [rwKey, supabaseKey, hyperliquidWallet, telegramToken, telegramId],
+      link: [
+        rwKey,
+        supabaseKey,
+        hyperliquidWallet,
+        risexApiKey,
+        telegramToken,
+        telegramId,
+      ],
       timeout: "15 minutes",
       runtime: "nodejs24.x",
     });
