@@ -60,8 +60,6 @@ export const handler: Handler = async () => {
     positions,
   );
 
-  console.log(Array.from(tickersToRebalance.values()));
-
   while (
     Date.now() - startTime < MAX_RUNTIME_MS &&
     tickersToRebalance.size > 0
@@ -99,6 +97,12 @@ export const handler: Handler = async () => {
         const book = await info.getOrderbook(Number(ticker));
         const bestPrice =
           order.side === 0 ? book.bids[0].price : book.asks[0].price;
+
+        if (
+          bestPrice &&
+          BN(order.price_ticks).times(desiredPosition.stepPrice).eq(bestPrice)
+        )
+          continue;
       }
     }
     break;
@@ -268,4 +272,8 @@ async function createLimitOrder({
   } else if (side === "SELL") {
     client.limitSell(Number(marketId), sizeSteps, priceTicks, true);
   }
+}
+
+function priceTicksToPrice(price: string, stepPrice: string) {
+  return BN(price).div(stepPrice).decimalPlaces(0, BN.ROUND_DOWN).toNumber();
 }
