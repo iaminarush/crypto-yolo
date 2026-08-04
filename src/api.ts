@@ -99,13 +99,13 @@ export const getDemeanedWeightsAndVols = async (
   const volatilities = await getVolatilities();
   let totalVol = new BigNumber(0);
 
-  // const filteredWeights = weights.data.filter((w) =>
-  //   ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"].includes(w.ticker),
-  // );
-
   const filteredWeights = weights.data.filter((w) =>
-    universe.includes(w.ticker),
+    ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"].includes(w.ticker),
   );
+
+  // const filteredWeights = weights.data.filter((w) =>
+  //   universe.includes(w.ticker),
+  // );
 
   const averageMomentum =
     filteredWeights.reduce((sum, v) => sum + v.momentum_megafactor, 0) /
