@@ -2,22 +2,35 @@ import type { Handler } from "aws-lambda";
 import BN from "bignumber.js";
 import type { Database } from "database.types";
 import {
+  ExchangeClient,
   InfoClient,
   type Market,
   type Position,
   formatWad,
 } from "risex-client";
+import { Resource } from "sst";
 import {
   getConfig,
   getDemeanedWeightsAndVols,
   getTickers,
   getWeights,
 } from "./api";
-import { Resource } from "sst";
+import { sendTelegramMessage } from "./util";
+
+const SLEEP_MS = 2250;
+const MAX_RUNTIME_MS = 10 * 60 * 1000;
 
 export const handler: Handler = async () => {
+  const startTime = Date.now();
+  // sendTelegramMessage("Risex Lambda Started");
+
   const WALLET = Resource.HYPERLIQUID_WALLET.value;
   const info = new InfoClient({ baseUrl: "https://api.rise.trade" });
+  const client = new ExchangeClient({
+    account: WALLET,
+    signerKey: Resource.RISEX_API_KEY.value,
+  });
+  await client.init();
   const config = await getConfig("risex");
   const weights = await getWeights();
   const markets = await info.getMarkets();
@@ -46,6 +59,50 @@ export const handler: Handler = async () => {
     desiredPositions,
     positions,
   );
+
+  console.log(Array.from(tickersToRebalance.values()));
+
+  while (
+    Date.now() - startTime < MAX_RUNTIME_MS &&
+    tickersToRebalance.size > 0
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
+    const updatedPositions = await info.getAllPositions(WALLET);
+    const orders = await info.getOpenOrders(WALLET);
+    for (const [ticker, desiredPosition] of tickersToRebalance) {
+      const order = orders.find((o) => `${o.market_id}` === ticker);
+
+      if (!order) {
+        const currentPosition = updatedPositions.find(
+          (p) => p.market_id === ticker,
+        );
+
+        const { side, size } = calculateOrderSize(
+          desiredPosition,
+          BN(currentPosition ? formatWad(currentPosition.size) : 0),
+        );
+
+        if (size.gt(0)) {
+          createLimitOrder({
+            client,
+            info,
+            side,
+            size,
+            marketId: ticker,
+            stepPrice: desiredPosition.stepPrice,
+            stepSize: desiredPosition.stepSize,
+          });
+        } else {
+          tickersToRebalance.delete(ticker);
+        }
+      } else {
+        const book = await info.getOrderbook(Number(ticker));
+        const bestPrice =
+          order.side === 0 ? book.bids[0].price : book.asks[0].price;
+      }
+    }
+    break;
+  }
 };
 
 const calculateDesiredPositions = (
@@ -81,8 +138,9 @@ const calculateDesiredPositions = (
       lowerBound: tokenAllocation.times(
         BN(isPositive ? -config.trade_buffer : config.trade_buffer).plus(1),
       ),
-      minOrderSizeChange: market.config.min_order_size,
-      szDecimals: market.config.step_size,
+      minOrdersize: market.config.min_order_size,
+      stepSize: market.config.step_size,
+      stepPrice: market.config.step_price,
     };
   });
 };
@@ -98,4 +156,116 @@ const filterTickersToRebalance = (
   );
 
   const result = new Map<string, TDesiredPosition>();
+
+  for (const dp of desiredPositions) {
+    const currentSize = positionMap.get(dp.exchangeTicker);
+
+    if (currentSize === undefined) {
+      result.set(dp.exchangeTicker, dp);
+      continue;
+    }
+
+    if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
+      continue;
+    }
+
+    result.set(dp.exchangeTicker, dp);
+  }
+  return result;
 };
+
+function calculateOrderSize(
+  desiredPosition: TDesiredPosition,
+  currentPosition: BN,
+) {
+  const { stepSize, lowerBound, upperBound, minOrdersize } = desiredPosition;
+
+  if (currentPosition.gte(lowerBound) && currentPosition.lte(upperBound)) {
+    return { size: BN(0), side: "BUY" };
+  }
+
+  if (currentPosition.lt(lowerBound)) {
+    const gap = lowerBound.minus(currentPosition);
+
+    const size = gap.lt(minOrdersize) ? BN(minOrdersize) : gap;
+
+    const roundedUp = roundToMinOrdersize(size, stepSize, BN.ROUND_UP);
+    const roundedDown = roundToMinOrdersize(size, stepSize, BN.ROUND_DOWN);
+
+    if (currentPosition.plus(roundedUp).lt(desiredPosition.upperBound))
+      return { size: roundedUp, side: "BUY" };
+
+    if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
+      return { size: roundedDown, side: "BUY" };
+
+    return { size: BigNumber(0), side: "BUY" };
+  }
+
+  if (currentPosition.gt(desiredPosition.upperBound)) {
+    const gap = desiredPosition.upperBound
+      .minus(currentPosition)
+      .absoluteValue();
+
+    const size = gap.lt(minOrdersize) ? BN(minOrdersize) : gap;
+
+    const roundedUp = roundToMinOrdersize(size, stepSize, BN.ROUND_UP);
+    const roundedDown = roundToMinOrdersize(size, stepSize, BN.ROUND_DOWN);
+
+    if (currentPosition.plus(roundedUp).gt(desiredPosition.lowerBound))
+      return { size: roundedUp, side: "SELL" };
+
+    if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
+      return { size: roundedDown, side: "SELL" };
+
+    return { size: BigNumber(0), side: "SELL" };
+  }
+  return { size: BN(0), side: "BUY" };
+}
+
+function roundToMinOrdersize(
+  size: BN,
+  stepSize: string,
+  roundingMode: BN.RoundingMode,
+) {
+  const step = BN(stepSize);
+  return size.div(step).decimalPlaces(0, roundingMode).times(step);
+}
+
+async function createLimitOrder({
+  client,
+  info,
+  side,
+  marketId,
+  size,
+  stepSize,
+  stepPrice,
+}: {
+  client: ExchangeClient;
+  info: InfoClient;
+  side: string;
+  marketId: string;
+  size: BN;
+  stepSize: string;
+  stepPrice: string;
+}) {
+  const sizeSteps = size
+    .div(stepSize)
+    .decimalPlaces(0, BN.ROUND_DOWN)
+    .toNumber();
+  const book = await info.getOrderbook(Number(marketId));
+  const bestBid = book.bids[0]?.price;
+  const bestAsk = book.asks[0]?.price;
+  if (!bestBid || !bestAsk)
+    throw new Error(`No best bid/ask for market ${marketId}`);
+  const price = side === "BUY" ? bestBid : bestAsk;
+  const priceTicks = BN(price)
+    .div(stepPrice)
+    .decimalPlaces(0, BN.ROUND_DOWN)
+    .toNumber();
+
+  if (side === "BUY") {
+    client.limitBuy(Number(marketId), sizeSteps, priceTicks, true);
+  } else if (side === "SELL") {
+    client.limitSell(Number(marketId), sizeSteps, priceTicks, true);
+  }
+}
