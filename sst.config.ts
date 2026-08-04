@@ -71,7 +71,7 @@ export default $config({
 
     const risexWorker = new sst.aws.Function("tradeRisex", {
       handler: "src/trade-risex.handler",
-      link: [rwKey, supabaseKey, hyperliquidWallet],
+      link: [rwKey, supabaseKey, hyperliquidWallet, telegramToken, telegramId],
       timeout: "15 minutes",
       runtime: "nodejs24.x",
     });
