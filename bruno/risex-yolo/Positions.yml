@@ -5,10 +5,10 @@ info:
 
 http:
   method: GET
-  url: https://api.rise.trade/v1/positions?account=***REMOVED***
+  url: https://api.rise.trade/v1/positions?account={{wallet}}
   params:
     - name: account
-      value: "***REMOVED***"
+      value: "{{wallet}}"
       type: query
   auth: inherit
 
