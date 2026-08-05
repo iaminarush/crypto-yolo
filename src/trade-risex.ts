@@ -1,6 +1,7 @@
 import type { Handler } from "aws-lambda";
 import BN from "bignumber.js";
 import type { Database } from "database.types";
+import ky from "ky";
 import {
   ExchangeClient,
   InfoClient,
@@ -9,25 +10,33 @@ import {
   formatWad,
 } from "risex-client";
 import { Resource } from "sst";
+import { z } from "zod";
 import {
   getConfig,
   getDemeanedWeightsAndVols,
   getTickers,
   getWeights,
 } from "./api";
-import { sendTelegramMessage } from "./util";
+import { fetchAndParse, sendTelegramMessage } from "./util";
 
 const SLEEP_MS = 2250;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 
+const PortfolioDetailsSchema = z.object({
+  summary: z.object({
+    account_leverage: z.string(),
+  }),
+});
+
 export const handler: Handler = async () => {
   const startTime = Date.now();
-  // sendTelegramMessage("Risex Lambda Started");
+  sendTelegramMessage("Risex Lambda Started");
 
   const WALLET = Resource.HYPERLIQUID_WALLET.value;
+  const API_WALLET = Resource.RISEX_WALLET.value;
   const info = new InfoClient({ baseUrl: "https://api.rise.trade" });
   const client = new ExchangeClient({
-    account: WALLET,
+    account: API_WALLET,
     signerKey: Resource.RISEX_API_KEY.value,
   });
   await client.init();
@@ -81,7 +90,7 @@ export const handler: Handler = async () => {
         );
 
         if (size.gt(0)) {
-          createLimitOrder({
+          await createLimitOrder({
             client,
             info,
             side,
@@ -103,10 +112,150 @@ export const handler: Handler = async () => {
           BN(order.price_ticks).times(desiredPosition.stepPrice).eq(bestPrice)
         )
           continue;
+
+        try {
+          await client.cancelOrder({
+            market_id: Number(ticker),
+            order_id: order.order_id,
+          });
+        } catch (error) {
+          console.error(`Cancel failed for ${desiredPosition.rwTicker}`, error);
+        }
+
+        const currentPosition = updatedPositions.find(
+          (p) => p.market_id === ticker,
+        );
+
+        const { size, side } = calculateOrderSize(
+          desiredPosition,
+          BN(currentPosition ? formatWad(currentPosition.size) : 0),
+        );
+
+        if (size.gt(0)) {
+          await createLimitOrder({
+            client,
+            info,
+            side,
+            size,
+            marketId: ticker,
+            stepPrice: desiredPosition.stepPrice,
+            stepSize: desiredPosition.stepSize,
+          });
+        } else {
+          tickersToRebalance.delete(ticker);
+        }
       }
     }
-    break;
   }
+
+  const filteredRisexMarkets = new Set(
+    tickers
+      .filter((t) => filteredMarkets.includes(t.rbw_ticker))
+      .map((t) => t.risex_ticker),
+  );
+  const openOrders = await info.getOpenOrders(WALLET);
+  const marketIds = [
+    ...new Set(
+      openOrders
+        .map((o) => o.market_id)
+        .filter((id) => filteredRisexMarkets.has(String(id))),
+    ),
+  ];
+  for (const marketId of marketIds) await client.cancelAllOrders(marketId);
+
+  const postTradePositions = await info.getAllPositions(WALLET);
+  const tickersToMarketOrder = filterTickersToRebalance(
+    desiredPositions,
+    postTradePositions,
+  );
+
+  for (const [ticker, desiredPosition] of tickersToMarketOrder) {
+    const currentPosition = postTradePositions.find(
+      (p) => p.market_id === ticker,
+    );
+    const { side, size } = calculateOrderSize(
+      desiredPosition,
+      BN(currentPosition ? formatWad(currentPosition.size) : 0),
+    );
+
+    if (size.gt(0)) {
+      const sizeSteps = size
+        .div(desiredPosition.stepSize)
+        .decimalPlaces(0, BN.ROUND_DOWN)
+        .toNumber();
+      side === "BUY"
+        ? await client.marketBuy(Number(ticker), sizeSteps)
+        : await client.marketSell(Number(ticker), sizeSteps);
+    }
+  }
+
+  const finalPositions = await info.getAllPositions(WALLET);
+
+  const tickersOutOfBuffer = await Promise.all(
+    Array.from(
+      filterTickersToRebalance(desiredPositions, finalPositions).values(),
+    ).map(async (fr) => {
+      const position = finalPositions.find(
+        (fp) => fp.market_id === fr.exchangeTicker,
+      );
+
+      const size = BN(formatWad(position?.size || "0"));
+      const book = await info.getOrderbook(Number(fr.exchangeTicker));
+      const midPrice =
+        (Number(book.bids[0].price) + Number(book.asks[0].price)) / 2;
+
+      const gapToLower = size.minus(fr.lowerBound).abs();
+      const gapToUpper = fr.upperBound.minus(size).abs();
+      const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
+      const priceGap = gap.times(midPrice).toNumber();
+
+      return { ...fr, size, priceGap };
+    }),
+  );
+
+  const runtimeMs = Date.now() - startTime;
+  const timedOut = runtimeMs >= MAX_RUNTIME_MS;
+  const minutes = Math.floor(runtimeMs / 60000);
+  const seconds = Math.floor((runtimeMs % 60000) / 1000);
+
+  const status = tickersToRebalance.size === 0 ? "Success" : "Incomplete";
+  const timeout = timedOut ? " (Timed out)" : "";
+  const remainingList =
+    tickersToRebalance.size > 0
+      ? Array.from(tickersToRebalance.keys()).join(", ")
+      : "None";
+  const outOfBoundsList =
+    tickersOutOfBuffer.length > 0
+      ? tickersOutOfBuffer
+          .map((t) => `${t.exchangeTicker} $${t.priceGap}`)
+          .join(", ")
+      : "None";
+
+  const {
+    summary: { account_leverage },
+  } = await fetchAndParse(
+    () =>
+      ky
+        .get("https://api.rise.trade/v1/portfolio/details", {
+          searchParams: { account: WALLET },
+        })
+        .json(),
+    PortfolioDetailsSchema,
+  );
+  const leverage = BN(account_leverage).decimalPlaces(2, BN.ROUND_HALF_UP);
+
+  const message = `
+  Risex Trading Complete
+
+  ${status}${timeout}
+  Runtime: ${minutes}m ${seconds}s
+  Remaining: ${remainingList}
+  Positions Out of Bounds: ${outOfBoundsList}
+  Leverage: ${leverage}`;
+
+  await sendTelegramMessage(message);
+
+  return { finalPositions, tickersOutOfBuffer };
 };
 
 const calculateDesiredPositions = (
@@ -202,7 +351,7 @@ function calculateOrderSize(
     if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
       return { size: roundedDown, side: "BUY" };
 
-    return { size: BigNumber(0), side: "BUY" };
+    return { size: BN(0), side: "BUY" };
   }
 
   if (currentPosition.gt(desiredPosition.upperBound)) {
@@ -221,7 +370,7 @@ function calculateOrderSize(
     if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
       return { size: roundedDown, side: "SELL" };
 
-    return { size: BigNumber(0), side: "SELL" };
+    return { size: BN(0), side: "SELL" };
   }
   return { size: BN(0), side: "BUY" };
 }
@@ -257,8 +406,8 @@ async function createLimitOrder({
     .decimalPlaces(0, BN.ROUND_DOWN)
     .toNumber();
   const book = await info.getOrderbook(Number(marketId));
-  const bestBid = book.bids[0]?.price;
-  const bestAsk = book.asks[0]?.price;
+  const bestBid = book.bids[0].price;
+  const bestAsk = book.asks[0].price;
   if (!bestBid || !bestAsk)
     throw new Error(`No best bid/ask for market ${marketId}`);
   const price = side === "BUY" ? bestBid : bestAsk;
@@ -268,12 +417,8 @@ async function createLimitOrder({
     .toNumber();
 
   if (side === "BUY") {
-    client.limitBuy(Number(marketId), sizeSteps, priceTicks, true);
+    await client.limitBuy(Number(marketId), sizeSteps, priceTicks, true);
   } else if (side === "SELL") {
-    client.limitSell(Number(marketId), sizeSteps, priceTicks, true);
+    await client.limitSell(Number(marketId), sizeSteps, priceTicks, true);
   }
-}
-
-function priceTicksToPrice(price: string, stepPrice: string) {
-  return BN(price).div(stepPrice).decimalPlaces(0, BN.ROUND_DOWN).toNumber();
 }
