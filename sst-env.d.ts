@@ -30,6 +30,10 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "RISEX_API_KEY": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "ROBOTWEALTH_KEY": {
       "type": "sst.sst.Secret"
       "value": string
@@ -59,6 +63,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "tradeHyperliquid": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "tradeRisex": {
       "name": string
       "type": "sst.aws.Function"
     }

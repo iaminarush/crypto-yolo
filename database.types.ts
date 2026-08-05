@@ -50,18 +50,21 @@ export type Database = {
           hyperliquid_ticker: string | null
           id: number
           rbw_ticker: string
+          risex_ticker: string | null
         }
         Insert: {
           extended_ticker: string
           hyperliquid_ticker?: string | null
           id?: number
           rbw_ticker?: string
+          risex_ticker?: string | null
         }
         Update: {
           extended_ticker?: string
           hyperliquid_ticker?: string | null
           id?: number
           rbw_ticker?: string
+          risex_ticker?: string | null
         }
         Relationships: []
       }

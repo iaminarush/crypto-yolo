@@ -256,10 +256,7 @@ const calculateDesiredPositions = (
     if (!exchangeTicker)
       throw new Error(`No hyperliquid ticker for ${vw.ticker}`);
 
-    const tokenAllocation =
-      "token_allocation" in vw
-        ? (vw.token_allocation as unknown as BN)
-        : new BN(0);
+    const tokenAllocation = vw.token_allocation;
 
     const isPositive = tokenAllocation.gte(0);
 

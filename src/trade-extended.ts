@@ -264,10 +264,7 @@ const calculateDesiredPositions = (
     const extendedTicker = tickerMap.get(vw.ticker);
     if (!extendedTicker) throw new Error(`No extended ticker for ${vw.ticker}`);
 
-    const tokenAllocation =
-      "token_allocation" in vw
-        ? (vw.token_allocation as unknown as BigNumber)
-        : new BigNumber(0);
+    const tokenAllocation = vw.token_allocation;
 
     const isPositive = tokenAllocation.gte(0);
 
