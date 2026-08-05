@@ -35,6 +35,7 @@ export const handler: Handler = async () => {
   const WALLET = Resource.HYPERLIQUID_WALLET.value;
   const API_WALLET = Resource.RISEX_WALLET.value;
   const info = new InfoClient({ baseUrl: "https://api.rise.trade" });
+  //TODO use production url
   const client = new ExchangeClient({
     account: API_WALLET,
     signerKey: Resource.RISEX_API_KEY.value,
