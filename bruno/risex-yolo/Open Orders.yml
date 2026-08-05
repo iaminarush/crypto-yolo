@@ -5,7 +5,11 @@ info:
 
 http:
   method: GET
-  url: https://api.rise.trade/v1/orders/open
+  url: https://api.rise.trade/v1/orders/open?account={{wallet}}
+  params:
+    - name: account
+      value: "{{wallet}}"
+      type: query
   auth: inherit
 
 settings:
