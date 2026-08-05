@@ -102,7 +102,13 @@ export default $config({
 
     const timestampChecker = new sst.aws.Function("TimestampChecker", {
       handler: "src/timestamp-checker.handler",
-      link: [rwKey, supabaseKey, extendedWorker, hyperliquidWorker],
+      link: [
+        rwKey,
+        supabaseKey,
+        extendedWorker,
+        hyperliquidWorker,
+        risexWorker,
+      ],
       runtime: "nodejs24.x",
     });
 

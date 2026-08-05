@@ -124,6 +124,12 @@ export const handler = async () => {
         InvocationType: "Event",
       }),
     );
+    await client.send(
+      new InvokeCommand({
+        FunctionName: Resource.tradeRisex.name,
+        InvocationType: "Event",
+      }),
+    );
 
     const nowTimestamp = Math.floor(Date.now() / 1000);
     await updateLastTriggered(nowTimestamp);
