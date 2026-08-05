@@ -34,10 +34,6 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
-    "RISEX_WALLET": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
     "ROBOTWEALTH_KEY": {
       "type": "sst.sst.Secret"
       "value": string
