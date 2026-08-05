@@ -6,11 +6,12 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "sso": "aws sso login --sso-session=account",
+    "lint": "biome lint",
     "genDBTypes": "pnpx supabase gen types typescript --project-id lapkwtulywsjfjogngcx --schema public > database.types.ts"
   },
   "keywords": [],
   "license": "ISC",
-  "packageManager": "pnpm@10.32.1",
+  "packageManager": "pnpm@11.15.1",
   "devDependencies": {
     "@biomejs/biome": "2.4.6",
     "@types/aws-lambda": "^8.10.159",
@@ -32,6 +33,7 @@
     "json-custom-numbers": "^3.1.1",
     "ky": "^1.14.2",
     "lodash-es": "^4.17.23",
+    "risex-client": "^0.1.11",
     "starknet": "^9.2.1",
     "viem": "^2.47.4",
     "zod": "^4.3.5"
