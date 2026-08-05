@@ -23,22 +23,24 @@ const SLEEP_MS = 2250;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 
 const PortfolioDetailsSchema = z.object({
-  summary: z.object({
-    account_leverage: z.string(),
+  data: z.object({
+    summary: z.object({
+      account_leverage: z.string(),
+    }),
   }),
 });
 
 export const handler: Handler = async () => {
   const startTime = Date.now();
+
   sendTelegramMessage("Risex Lambda Started");
 
   const WALLET = Resource.HYPERLIQUID_WALLET.value;
-  const API_WALLET = Resource.RISEX_WALLET.value;
   const info = new InfoClient({ baseUrl: "https://api.rise.trade" });
-  //TODO use production url
   const client = new ExchangeClient({
-    account: API_WALLET,
+    account: WALLET,
     signerKey: Resource.RISEX_API_KEY.value,
+    baseUrl: "https://api.rise.trade",
   });
   await client.init();
   const config = await getConfig("risex");
@@ -233,7 +235,9 @@ export const handler: Handler = async () => {
       : "None";
 
   const {
-    summary: { account_leverage },
+    data: {
+      summary: { account_leverage },
+    },
   } = await fetchAndParse(
     () =>
       ky
