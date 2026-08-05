@@ -27,6 +27,7 @@ export default $config({
     const hyperliquidWallet = new sst.Secret("HYPERLIQUID_WALLET");
     const hyperliquidKey = new sst.Secret("HYPERLIQUID_KEY");
 
+    const risexWallet = new sst.Secret("RISEX_WALLET");
     const risexApiKey = new sst.Secret("RISEX_API_KEY");
 
     const errorTopic = new sst.aws.SnsTopic("FailureTopic");
@@ -77,6 +78,7 @@ export default $config({
         rwKey,
         supabaseKey,
         hyperliquidWallet,
+        risexWallet,
         risexApiKey,
         telegramToken,
         telegramId,
