@@ -7,6 +7,7 @@ import {
   InfoClient,
   type Market,
   type Position,
+  RiseApiError,
   formatWad,
 } from "risex-client";
 import { Resource } from "sst";
@@ -421,9 +422,17 @@ async function createLimitOrder({
     .decimalPlaces(0, BN.ROUND_DOWN)
     .toNumber();
 
-  if (side === "BUY") {
-    await client.limitBuy(Number(marketId), sizeSteps, priceTicks, true);
-  } else if (side === "SELL") {
-    await client.limitSell(Number(marketId), sizeSteps, priceTicks, true);
+  //TODO Handle error due to order not being post only
+  while (true) {
+    try {
+      if (side === "BUY") {
+        await client.limitBuy(Number(marketId), sizeSteps, priceTicks, true);
+      } else if (side === "SELL") {
+        await client.limitSell(Number(marketId), sizeSteps, priceTicks, true);
+      }
+    } catch (error) {
+      if (error instanceof RiseApiError) {
+      }
+    }
   }
 }
