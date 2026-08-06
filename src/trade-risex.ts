@@ -54,19 +54,6 @@ export const handler: Handler = async () => {
   const markets = await info.getMarkets();
   const tickers = await getTickers();
 
-  // try {
-  //   await client.limitBuy(
-  //     5,
-  //     1,
-  //     BN(60).div(0.001).decimalPlaces(0, BN.ROUND_DOWN).toNumber(),
-  //     true,
-  //   );
-  // } catch (error) {
-  //   console.log(error);
-  // }
-  //
-  // return;
-
   const positions = await info.getAllPositions(WALLET);
 
   const filteredMarkets = tickers
