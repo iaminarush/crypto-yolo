@@ -6,8 +6,12 @@ import {
   ExchangeClient,
   InfoClient,
   type Market,
+  OrderType,
   type Position,
   RiseApiError,
+  Side,
+  StpMode,
+  TimeInForce,
   formatWad,
 } from "risex-client";
 import { Resource } from "sst";
@@ -19,6 +23,7 @@ import {
   getWeights,
 } from "./api";
 import { fetchAndParse, sendTelegramMessage } from "./util";
+import { SLIPPAGE } from "./constants";
 
 const SLEEP_MS = 2250;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
@@ -34,7 +39,7 @@ const PortfolioDetailsSchema = z.object({
 export const handler: Handler = async () => {
   const startTime = Date.now();
 
-  sendTelegramMessage("Risex Lambda Started");
+  sendTelegramMessage("Risex Lambda Started").catch(console.error);
 
   const WALLET = Resource.HYPERLIQUID_WALLET.value;
   const info = new InfoClient({ baseUrl: "https://api.rise.trade" });
@@ -48,6 +53,19 @@ export const handler: Handler = async () => {
   const weights = await getWeights();
   const markets = await info.getMarkets();
   const tickers = await getTickers();
+
+  // try {
+  //   await client.limitBuy(
+  //     5,
+  //     1,
+  //     BN(60).div(0.001).decimalPlaces(0, BN.ROUND_DOWN).toNumber(),
+  //     true,
+  //   );
+  // } catch (error) {
+  //   console.log(error);
+  // }
+  //
+  // return;
 
   const positions = await info.getAllPositions(WALLET);
 
@@ -173,6 +191,8 @@ export const handler: Handler = async () => {
     postTradePositions,
   );
 
+  const tickersMarketOrdered: string[] = [];
+
   for (const [ticker, desiredPosition] of tickersToMarketOrder) {
     const currentPosition = postTradePositions.find(
       (p) => p.market_id === ticker,
@@ -187,9 +207,28 @@ export const handler: Handler = async () => {
         .div(desiredPosition.stepSize)
         .decimalPlaces(0, BN.ROUND_DOWN)
         .toNumber();
-      side === "BUY"
-        ? await client.marketBuy(Number(ticker), sizeSteps)
-        : await client.marketSell(Number(ticker), sizeSteps);
+      const book = await info.getOrderbook(Number(ticker));
+      const price =
+        side === "BUY"
+          ? BN(book.asks[0].price).times(1 + SLIPPAGE)
+          : BN(book.bids[0].price).times(1 - SLIPPAGE);
+      const priceTicks = price
+        .div(desiredPosition.stepPrice)
+        .decimalPlaces(0, side === "BUY" ? BN.ROUND_UP : BN.ROUND_DOWN)
+        .toNumber();
+      await client.placeOrder({
+        market_id: Number(ticker),
+        size_steps: sizeSteps,
+        price_ticks: priceTicks,
+        side: side === "BUY" ? Side.Long : Side.Short,
+        order_type: OrderType.Market,
+        time_in_force: TimeInForce.ImmediateOrCancel,
+        post_only: false,
+        reduce_only: false,
+        stp_mode: StpMode.ExpireMaker,
+        ttl_units: 0,
+      });
+      tickersMarketOrdered.push(desiredPosition.rwTicker);
     }
   }
 
@@ -218,20 +257,21 @@ export const handler: Handler = async () => {
   );
 
   const runtimeMs = Date.now() - startTime;
-  const timedOut = runtimeMs >= MAX_RUNTIME_MS;
   const minutes = Math.floor(runtimeMs / 60000);
   const seconds = Math.floor((runtimeMs % 60000) / 1000);
 
-  const status = tickersToRebalance.size === 0 ? "Success" : "Incomplete";
-  const timeout = timedOut ? " (Timed out)" : "";
-  const remainingList =
-    tickersToRebalance.size > 0
-      ? Array.from(tickersToRebalance.keys()).join(", ")
-      : "None";
+  const status =
+    tickersToRebalance.size === 0
+      ? "Maker on all orders"
+      : tickersToMarketOrder.size > tickersMarketOrdered.length
+        ? "Incomplete"
+        : `${tickersMarketOrdered.length} taker orders`;
+  const marketedList =
+    tickersMarketOrdered.length > 0 ? tickersMarketOrdered.join(", ") : "None";
   const outOfBoundsList =
     tickersOutOfBuffer.length > 0
       ? tickersOutOfBuffer
-          .map((t) => `${t.exchangeTicker} $${t.priceGap}`)
+          .map((t) => `${t.exchangeTicker} $${t.priceGap.toFixed(2)}`)
           .join(", ")
       : "None";
 
@@ -253,9 +293,9 @@ export const handler: Handler = async () => {
   const message = `
   Risex Trading Complete
 
-  ${status}${timeout}
+  ${status}
   Runtime: ${minutes}m ${seconds}s
-  Remaining: ${remainingList}
+  Market Order list: ${marketedList}
   Positions Out of Bounds: ${outOfBoundsList}
   Leverage: ${leverage}`;
 
@@ -390,6 +430,15 @@ function roundToMinOrdersize(
   return size.div(step).decimalPlaces(0, roundingMode).times(step);
 }
 
+const MIN_RETRY_DELAY_MS = 1500;
+const MAX_RETRY_DELAY_MS = 2500;
+
+const getRandomDelay = () =>
+  Math.floor(Math.random() * (MAX_RETRY_DELAY_MS - MIN_RETRY_DELAY_MS + 1)) +
+  MIN_RETRY_DELAY_MS;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function createLimitOrder({
   client,
   info,
@@ -411,28 +460,32 @@ async function createLimitOrder({
     .div(stepSize)
     .decimalPlaces(0, BN.ROUND_DOWN)
     .toNumber();
-  const book = await info.getOrderbook(Number(marketId));
-  const bestBid = book.bids[0].price;
-  const bestAsk = book.asks[0].price;
-  if (!bestBid || !bestAsk)
-    throw new Error(`No best bid/ask for market ${marketId}`);
-  const price = side === "BUY" ? bestBid : bestAsk;
-  const priceTicks = BN(price)
-    .div(stepPrice)
-    .decimalPlaces(0, BN.ROUND_DOWN)
-    .toNumber();
 
-  //TODO Handle error due to order not being post only
   while (true) {
+    const book = await info.getOrderbook(Number(marketId));
+    const bestBid = book.bids[0].price;
+    const bestAsk = book.asks[0].price;
+    if (!bestBid || !bestAsk)
+      throw new Error(`No best bid/ask for market ${marketId}`);
+    const price = side === "BUY" ? bestBid : bestAsk;
+    const priceTicks = BN(price)
+      .div(stepPrice)
+      .decimalPlaces(0, BN.ROUND_DOWN)
+      .toNumber();
     try {
       if (side === "BUY") {
         await client.limitBuy(Number(marketId), sizeSteps, priceTicks, true);
       } else if (side === "SELL") {
         await client.limitSell(Number(marketId), sizeSteps, priceTicks, true);
       }
+      return;
     } catch (error) {
       if (error instanceof RiseApiError) {
+        await sleep(getRandomDelay());
+        continue;
       }
+      console.warn(error);
+      return;
     }
   }
 }

@@ -24,7 +24,7 @@ const MINIMUM_ORDER_VALUE = BN(10);
 
 export const handler: Handler = async () => {
   const startTime = Date.now();
-  sendTelegramMessage("Hyperliquid Lambda Started");
+  sendTelegramMessage("Hyperliquid Lambda Started").catch(console.error);
 
   const WALLET = Resource.HYPERLIQUID_WALLET.value as Hex;
   const transport = new HttpTransport();
@@ -145,6 +145,8 @@ export const handler: Handler = async () => {
     postTradePositions,
   );
 
+  const tickersMarketOrdered: string[] = [];
+
   for (const [ticker, desiredPosition] of tickersToMarketOrder) {
     const allMids = await client.allMids();
     const currentPosition = postTradePositions.find(
@@ -172,6 +174,7 @@ export const handler: Handler = async () => {
           },
         ],
       });
+      tickersMarketOrdered.push(desiredPosition.rwTicker);
     }
   }
 
@@ -201,20 +204,22 @@ export const handler: Handler = async () => {
   });
 
   const runtimeMs = Date.now() - startTime;
-  const timedOut = runtimeMs >= MAX_RUNTIME_MS;
   const minutes = Math.floor(runtimeMs / 60000);
   const seconds = Math.floor((runtimeMs % 60000) / 1000);
 
-  const status = tickersToRebalance.size === 0 ? "Success" : "Incomplete";
-  const timeout = timedOut ? " (Timed out)" : "";
-  const remainingList =
-    tickersToRebalance.size > 0
-      ? Array.from(tickersToRebalance.keys()).join(", ")
-      : "None";
+  // const status = tickersToRebalance.size === 0 ? "Success" : "Incomplete";
+  const status =
+    tickersToRebalance.size === 0
+      ? "Maker on all orders"
+      : tickersToMarketOrder.size > tickersMarketOrdered.length
+        ? "Incomplete"
+        : `${tickersMarketOrdered.length} taker orders`;
+  const marketedList =
+    tickersMarketOrdered.length > 0 ? tickersMarketOrdered.join(", ") : "None";
   const outOfBoundsList =
     tickersOutOfBuffer.length > 0
       ? tickersOutOfBuffer
-          .map((t) => `${t.exchangeTicker} $${t.priceGap}`)
+          .map((t) => `${t.exchangeTicker} $${t.priceGap.toFixed(2)}`)
           .join(", ")
       : "None";
 
@@ -228,9 +233,9 @@ export const handler: Handler = async () => {
   const message = `
   Hyperliquid Trading Complete
 
-  ${status}${timeout}
+  ${status}
   Runtime: ${minutes}m ${seconds}s
-  Remaining: ${remainingList}
+  Market Order list: ${marketedList}
   Positions Out of Bounds: ${outOfBoundsList}
   Leverage: ${leverage}`;
 

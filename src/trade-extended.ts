@@ -25,7 +25,7 @@ export const handler: Handler = async () => {
     await init();
     const startTime = Date.now();
 
-    await sendTelegramMessage("Extended Lambda Started").catch(console.error);
+    sendTelegramMessage("Extended Lambda Started").catch(console.error);
 
     const config = await getConfig("extended");
     const volAndWeight = await getWeightsAndVolatilities(config);
@@ -143,6 +143,8 @@ export const handler: Handler = async () => {
       postTradePositions,
     );
 
+    const tickersMarketOrdered: string[] = [];
+
     for (const [ticker, desiredPosition] of tickersToMarketOrder) {
       const currentPosition = postTradePositions.find(
         (p) => p.market === ticker,
@@ -156,12 +158,11 @@ export const handler: Handler = async () => {
 
       if (size.gt(0)) {
         await createMarketOrder({ ticker, size, side });
+        tickersMarketOrdered.push(desiredPosition.rwTicker);
       }
     }
 
     const finalPositions = await getPositions();
-
-    console.log(finalPositions);
 
     const tickersOutOfBuffer = Array.from(
       filterTickersToRebalance(desiredPositions, finalPositions).values(),
@@ -188,20 +189,21 @@ export const handler: Handler = async () => {
       const gapToUpper = fr.upperBound.minus(size).abs();
       const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
 
-      console.log(size, midPrice, gap);
-
       const priceGap = gap.times(midPrice).toNumber();
 
       return { ...fr, size, priceGap };
     });
 
-    console.log(tickersOutOfBuffer);
-
     const result: TradeResult = {
-      success: tickersToRebalance.size === 0,
+      status:
+        tickersToRebalance.size === 0
+          ? "Maker on all orders"
+          : tickersToMarketOrder.size > tickersMarketOrdered.length
+            ? "Incomplete"
+            : `${tickersMarketOrdered.length} taker orders`,
       timedOut: Date.now() - startTime >= MAX_RUNTIME_MS,
       runtimeMs: Date.now() - startTime,
-      remainingTickers: Array.from(tickersToRebalance.keys()),
+      marketTickers: tickersMarketOrdered,
       positions: finalPositions.map((p) => ({
         market: p.market,
         side: p.side,
@@ -216,25 +218,23 @@ export const handler: Handler = async () => {
     const minutes = Math.floor(runtimeSec / 60);
     const seconds = runtimeSec % 60;
 
-    const status = result.success ? "Success" : "Failed";
-    const timeout = result.timedOut ? " (timed out)" : "";
-    const remainingList =
-      result.remainingTickers.length > 0
-        ? result.remainingTickers.join(", ")
+    const marketedList =
+      result.marketTickers.length > 0
+        ? result.marketTickers.join(", ")
         : "None";
     const outOfBoundsList =
       tickersOutOfBuffer.length > 0
         ? tickersOutOfBuffer
-            .map((t) => `${t.extendedTicker} $${t.priceGap}`)
+            .map((t) => `${t.extendedTicker} $${t.priceGap.toFixed(2)}`)
             .join(", ")
         : "None";
 
     const message = `
   Extended Trading Complete
 
-  ${status}${timeout}
+  ${result.status}
   Runtime: ${minutes}m ${seconds}s
-  Remaining: ${remainingList}
+  Market Order list: ${marketedList}
   Positions Out of Bounds: ${outOfBoundsList}
   Leverage: ${balance.leverage.decimalPlaces(2, BigNumber.ROUND_HALF_UP)}`;
 
@@ -398,9 +398,9 @@ const filterTickersToRebalance = (
 };
 
 type TradeResult = {
-  success: boolean;
+  status: string;
   timedOut: boolean;
   runtimeMs: number;
-  remainingTickers: string[];
+  marketTickers: string[];
   positions: { market: string; side: string; size: string; value: string }[];
 };
