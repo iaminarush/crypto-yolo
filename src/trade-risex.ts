@@ -471,7 +471,6 @@ async function createLimitOrder({
         await sleep(getRandomDelay());
         continue;
       }
-      console.warn(error);
       return;
     }
   }
