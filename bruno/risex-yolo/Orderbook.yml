@@ -1,0 +1,15 @@
+info:
+  name: Orderbook
+  type: http
+  seq: 6
+
+http:
+  method: GET
+  url: https://api.rise.trade/v1/orderbook
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
