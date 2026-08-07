@@ -24,6 +24,7 @@ import {
 } from "./api";
 import { fetchAndParse, sendTelegramMessage } from "./util";
 import { SLIPPAGE } from "./constants";
+import { Result, TaggedError } from "better-result";
 
 const SLEEP_MS = 2250;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
@@ -475,4 +476,72 @@ async function createLimitOrder({
       return;
     }
   }
+}
+
+class PlaceLimitOrderError extends TaggedError("PlaceLimitOrderError")<{
+  marketId: string;
+  side: string;
+  cause?: unknown;
+  message: string;
+}> {}
+
+async function _createLimitOrder({
+  client,
+  info,
+  side,
+  marketId,
+  size,
+  stepSize,
+  stepPrice,
+}: {
+  client: ExchangeClient;
+  info: InfoClient;
+  side: string;
+  marketId: string;
+  size: BN;
+  stepSize: string;
+  stepPrice: string;
+}) {
+  const sizeSteps = size
+    .div(stepSize)
+    .decimalPlaces(0, BN.ROUND_DOWN)
+    .toNumber();
+
+  const result = await Result.tryPromise(
+    {
+      try: async () => {
+        const book = await info.getOrderbook(Number(marketId));
+        const price = side === "BUY" ? book.bids[0].price : book.asks[0].price;
+        if (!price)
+          throw new PlaceLimitOrderError({
+            marketId,
+            side,
+            message: "No best bid/ask on orderbook",
+          });
+        const priceTicks = BN(price)
+          .div(stepPrice)
+          .decimalPlaces(0, BN.ROUND_DOWN)
+          .toNumber();
+        if (side === "BUY") {
+          await client.limitBuy(Number(marketId), sizeSteps, priceTicks, true);
+        } else if (side === "SELL") {
+          await client.limitSell(Number(marketId), sizeSteps, priceTicks, true);
+        }
+      },
+      catch: (cause) =>
+        new PlaceLimitOrderError({
+          marketId,
+          side,
+          cause,
+          message:
+            cause instanceof Error ? cause.message : "Best bid/ask not found",
+        }),
+    },
+    {
+      retry: {
+        times: 20,
+        delayMs: () => getRandomDelay(),
+      },
+    },
+  );
 }
