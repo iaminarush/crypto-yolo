@@ -29,6 +29,8 @@ import { Result, TaggedError } from "better-result";
 const SLEEP_MS = 2250;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 
+type OrderSide = "BUY" | "SELL";
+
 const PortfolioDetailsSchema = z.object({
   data: z.object({
     summary: z.object({
@@ -124,10 +126,7 @@ export const handler: Handler = async () => {
           continue;
 
         try {
-          await client.cancelOrder({
-            market_id: Number(ticker),
-            order_id: order.order_id,
-          });
+          await client.cancelAllOrders(Number(ticker));
         } catch (error) {
           console.error(`Cancel failed for ${desiredPosition.rwTicker}`, error);
         }
@@ -364,7 +363,7 @@ const filterTickersToRebalance = (
 function calculateOrderSize(
   desiredPosition: TDesiredPosition,
   currentPosition: BN,
-) {
+): { size: BN; side: OrderSide } {
   const { stepSize, lowerBound, upperBound, minOrdersize } = desiredPosition;
 
   if (currentPosition.gte(lowerBound) && currentPosition.lte(upperBound)) {
@@ -427,7 +426,7 @@ const getRandomDelay = () =>
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function createLimitOrder({
+async function _createLimitOrderOld({
   client,
   info,
   side,
@@ -438,7 +437,7 @@ async function createLimitOrder({
 }: {
   client: ExchangeClient;
   info: InfoClient;
-  side: string;
+  side: OrderSide;
   marketId: string;
   size: BN;
   stepSize: string;
@@ -484,7 +483,7 @@ class PlaceLimitOrderError extends TaggedError("PlaceLimitOrderError")<{
   message: string;
 }> {}
 
-async function _createLimitOrder({
+async function createLimitOrder({
   client,
   info,
   side,
@@ -510,13 +509,9 @@ async function _createLimitOrder({
     {
       try: async () => {
         const book = await info.getOrderbook(Number(marketId));
-        const price = side === "BUY" ? book.bids[0].price : book.asks[0].price;
-        if (!price)
-          throw new PlaceLimitOrderError({
-            marketId,
-            side,
-            message: "No best bid/ask on orderbook",
-          });
+        const price =
+          side === "BUY" ? book.bids[0]?.price : book.asks[0]?.price;
+        if (!price) throw new Error("No best bid/ask on orderbook");
         const priceTicks = BN(price)
           .div(stepPrice)
           .decimalPlaces(0, BN.ROUND_DOWN)
@@ -533,14 +528,17 @@ async function _createLimitOrder({
           side,
           cause,
           message:
-            cause instanceof Error ? cause.message : "Best bid/ask not found",
+            cause instanceof Error ? cause.message : "Limit order failed",
         }),
     },
     {
       retry: {
-        times: 20,
+        times: 49,
         delayMs: () => getRandomDelay(),
       },
     },
   );
+
+  if (Result.isError(result)) console.warn(result.error);
+  return result;
 }

@@ -2,3 +2,5 @@ allowBuilds:
   aws-sdk: true
   esbuild: true
 minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - better-result@3.0.0
