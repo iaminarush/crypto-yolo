@@ -227,7 +227,7 @@ export const handler: Handler = async () => {
     const outOfBoundsList =
       tickersOutOfBuffer.length > 0
         ? tickersOutOfBuffer
-            .map((t) => `${t.extendedTicker} $${t.priceGap.toFixed(2)}`)
+            .map((t) => `${t.rwTicker} $${t.priceGap.toFixed(2)}`)
             .join(", ")
         : "None";
 
