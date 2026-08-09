@@ -162,7 +162,9 @@ export const handler: Handler = async () => {
       }
     }
 
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     const finalPositions = await getPositions();
+    console.log(finalPositions);
 
     const tickersOutOfBuffer = Array.from(
       filterTickersToRebalance(desiredPositions, finalPositions).values(),
