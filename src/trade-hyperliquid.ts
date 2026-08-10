@@ -207,7 +207,6 @@ export const handler: Handler = async () => {
   const minutes = Math.floor(runtimeMs / 60000);
   const seconds = Math.floor((runtimeMs % 60000) / 1000);
 
-  // const status = tickersToRebalance.size === 0 ? "Success" : "Incomplete";
   const status =
     tickersToRebalance.size === 0
       ? "Maker on all orders"
@@ -219,7 +218,7 @@ export const handler: Handler = async () => {
   const outOfBoundsList =
     tickersOutOfBuffer.length > 0
       ? tickersOutOfBuffer
-          .map((t) => `${t.exchangeTicker} $${t.priceGap.toFixed(2)}`)
+          .map((t) => `${t.rwTicker} $${t.priceGap.toFixed(2)}`)
           .join(", ")
       : "None";
 
@@ -343,7 +342,7 @@ function calculateOrderSize(
     if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
       return { size: roundedDown, side: "BUY" };
 
-    return { size: BigNumber(0), side: "BUY" };
+    return { size: BN(0), side: "BUY" };
   }
 
   if (currentPosition.gt(desiredPosition.upperBound)) {
@@ -362,7 +361,7 @@ function calculateOrderSize(
     if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
       return { size: roundedDown, side: "SELL" };
 
-    return { size: BigNumber(0), side: "SELL" };
+    return { size: BN(0), side: "SELL" };
   }
 
   return { size: BN(0), side: "BUY" };
