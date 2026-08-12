@@ -7,6 +7,7 @@
  * never reaches the browser bundle.
  */
 import { z } from "zod";
+import { env } from "~/lib/env";
 
 const DEFAULT_EXTENDED_API = "https://api.starknet.extended.exchange";
 
@@ -46,11 +47,8 @@ export type ExtendedPositions = {
 };
 
 export async function getExtendedPositions(): Promise<ExtendedPositions> {
-	const apiKey = process.env.EXTENDED_API_KEY;
-	if (!apiKey) {
-		throw new Error("Missing EXTENDED_API_KEY env var");
-	}
-	const baseUrl = process.env.EXTENDED_API ?? DEFAULT_EXTENDED_API;
+	const apiKey = env.EXTENDED_API_KEY;
+	const baseUrl = env.EXTENDED_API ?? DEFAULT_EXTENDED_API;
 
 	const headers: Record<string, string> = { "x-api-key": apiKey };
 	const signal = AbortSignal.timeout(15_000);

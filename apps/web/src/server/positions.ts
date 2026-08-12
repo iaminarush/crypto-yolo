@@ -2,7 +2,13 @@
  * Server functions — the only boundary through which the dashboard talks to
  * exchanges and Supabase. Handlers run exclusively on the server (they are
  * replaced with RPC stubs in client bundles), so private keys and API keys
- * read from process.env never reach the browser.
+ * never reach the browser.
+ *
+ * Env vars are validated once at startup (see ~/lib/env) — a missing or
+ * malformed variable crashes the app loudly instead of rendering broken
+ * cards. The settled() wrapper below guards *runtime* failures (network
+ * errors, API timeouts, malformed exchange responses) so one dead exchange
+ * degrades its card instead of crashing the whole page.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { getExtendedPositions } from "~/lib/server/extended.server";
@@ -33,8 +39,8 @@ export type ExchangeBlock = {
 type Settled<T> = PromiseSettledResult<T>;
 
 /** Wrap a possibly-sync-throwing producer into a settled promise, so a
- *  missing env var (e.g. unconfigured Supabase) degrades a card instead of
- *  crashing the whole page. */
+ *  runtime failure (network error, API timeout, malformed response) degrades
+ *  a card instead of crashing the whole page. */
 const settled = <T>(fn: () => PromiseLike<T>): Promise<Settled<T>> =>
 	Promise.resolve()
 		.then(fn)
