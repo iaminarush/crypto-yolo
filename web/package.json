@@ -1,0 +1,44 @@
+{
+  "name": "web",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build",
+    "check-types": "pnpm -r check-types",
+    "dev:web": "pnpm --filter web dev",
+    "db:push": "pnpm --filter @web/db db:push",
+    "db:studio": "pnpm --filter @web/db db:studio",
+    "db:generate": "pnpm --filter @web/db db:generate",
+    "db:migrate": "pnpm --filter @web/db db:migrate",
+    "deploy:setup": "vercel link",
+    "dev:vercel": "vercel dev -L",
+    "env:preview": "tsx scripts/sync-vercel-env.ts preview",
+    "env:production": "tsx scripts/sync-vercel-env.ts production",
+    "deploy": "vercel deploy",
+    "deploy:prod": "vercel deploy --prod",
+    "deploy:check": "vercel deploy --dry",
+    "check": "ultracite check",
+    "fix": "ultracite fix"
+  },
+  "dependencies": {
+    "@web/env": "workspace:*",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@web/config": "workspace:*",
+    "oxfmt": "latest",
+    "oxlint": "latest",
+    "tsx": "^4.23.1",
+    "typescript": "catalog:",
+    "ultracite": "7.9.4",
+    "vercel": "^58.1.0"
+  },
+  "packageManager": "pnpm@11.16.0"
+}
