@@ -1,0 +1,31 @@
+{
+	"name": "web",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build && tsc --noEmit",
+		"preview": "vite preview",
+		"start": "node .output/server/index.mjs"
+	},
+	"dependencies": {
+		"@nktkas/hyperliquid": "^0.32.1",
+		"@supabase/supabase-js": "^2.90.1",
+		"@tanstack/react-router": "1.170.19",
+		"@tanstack/react-start": "1.168.36",
+		"bignumber.js": "^9.3.1",
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0",
+		"risex-client": "^0.1.11",
+		"zod": "^4.3.5"
+	},
+	"devDependencies": {
+		"@types/node": "^25.0.10",
+		"@types/react": "^19.0.8",
+		"@types/react-dom": "^19.0.3",
+		"@vitejs/plugin-react": "^6.0.1",
+		"nitro": "^3.0.260311-beta",
+		"typescript": "^5.9.3",
+		"vite": "8.2.0"
+	}
+}
