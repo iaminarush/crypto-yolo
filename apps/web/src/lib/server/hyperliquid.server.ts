@@ -6,6 +6,7 @@
  * server functions so it never reaches the browser bundle.
  */
 import { HttpTransport, InfoClient } from "@nktkas/hyperliquid";
+import { env } from "~/lib/env";
 
 export type HyperliquidPositions = {
 	positions: Array<{
@@ -24,10 +25,7 @@ export type HyperliquidPositions = {
 };
 
 export async function getHyperliquidPositions(): Promise<HyperliquidPositions> {
-	const wallet = process.env.HYPERLIQUID_WALLET;
-	if (!wallet) {
-		throw new Error("Missing HYPERLIQUID_WALLET env var");
-	}
+	const wallet = env.HYPERLIQUID_WALLET;
 
 	const transport = new HttpTransport();
 	const client = new InfoClient({ transport });

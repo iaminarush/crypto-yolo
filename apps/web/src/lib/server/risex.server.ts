@@ -7,6 +7,7 @@
  * functions so it never reaches the browser bundle.
  */
 import { InfoClient, formatWad } from "risex-client";
+import { env } from "~/lib/env";
 
 export type RisexPositions = {
 	positions: Array<{
@@ -22,10 +23,7 @@ export type RisexPositions = {
 };
 
 export async function getRisexPositions(): Promise<RisexPositions> {
-	const wallet = process.env.RISEX_WALLET ?? process.env.HYPERLIQUID_WALLET;
-	if (!wallet) {
-		throw new Error("Missing RISEX_WALLET (or HYPERLIQUID_WALLET) env var");
-	}
+	const wallet = env.RISEX_WALLET ?? env.HYPERLIQUID_WALLET;
 
 	const info = new InfoClient({ baseUrl: "https://api.rise.trade" });
 	const raw = await info.getAllPositions(wallet);
