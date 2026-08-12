@@ -1,6 +1,10 @@
 # sst
 .sst
 
+# web app env / vercel
+.env.local
+.vercel
+
 # Logs
 logs
 *.log
