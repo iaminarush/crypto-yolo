@@ -16,6 +16,7 @@ import { init } from "./extended/init";
 import { Decimal } from "./extended/utils/number";
 import { roundToMinChange } from "./extended/utils/round-to-min-change.ts";
 import { sendTelegramMessage } from "./util.ts";
+import { createRFQMarketOrder } from "./extended/create-rfq-market-order.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
@@ -53,6 +54,10 @@ export const handler: Handler = async () => {
       tickersToRebalance.size > 0
     ) {
       for (const [ticker, desiredPosition] of tickersToRebalance) {
+        if (desiredPosition.isRfq) {
+          tickersToRebalance.delete(ticker);
+          continue;
+        }
         const order = await getOrders({ marketsNames: [ticker] });
         if (order.length === 0) {
           const updatedPositions = await getPositions();
@@ -157,14 +162,17 @@ export const handler: Handler = async () => {
       );
 
       if (size.gt(0)) {
-        await createMarketOrder({ ticker, size, side });
+        if (desiredPosition.isRfq) {
+          await createRFQMarketOrder({ ticker, size, side });
+        } else {
+          await createMarketOrder({ ticker, size, side });
+        }
         tickersMarketOrdered.push(desiredPosition.rwTicker);
       }
     }
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const finalPositions = await getPositions();
-    console.log(finalPositions);
 
     const tickersOutOfBuffer = Array.from(
       filterTickersToRebalance(desiredPositions, finalPositions).values(),
@@ -245,7 +253,9 @@ export const handler: Handler = async () => {
     return result;
   } catch (error) {
     console.error("Lambda error:", error);
-    await sendTelegramMessage(`Lambda error: ${error}`);
+    if (error instanceof Error) {
+      await sendTelegramMessage(`Lambda error: ${error.message}`);
+    }
     throw error;
   }
 };
@@ -290,6 +300,7 @@ const calculateDesiredPositions = (
       minOrdersizeChange: market
         ? market.tradingConfig.minOrderSizeChange
         : BigNumber(0),
+      isRfq: market?.isRfq ?? false,
     };
   });
 };
