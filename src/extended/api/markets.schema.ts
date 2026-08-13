@@ -33,6 +33,7 @@ export const MarketSchema = z.object({
   collateralAssetName: z.string(),
   collateralAssetPrecision: z.number(),
   active: z.boolean(),
+  isRfq: z.boolean(),
   status: z.enum([
     "ACTIVE",
     "REDUCE_ONLY",
