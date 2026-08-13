@@ -10,7 +10,7 @@ import { createOrderContext } from "./utils/create-order-context";
 import { Decimal } from "./utils/number";
 import { roundToMinChange } from "./utils/round-to-min-change";
 
-export const createMarketOrder = async ({
+export const createRFQMarketOrder = async ({
   ticker,
   size,
   side,
