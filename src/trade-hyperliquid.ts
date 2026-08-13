@@ -1,5 +1,6 @@
 import {
   type AllMidsResponse,
+  ApiRequestError,
   type ClearinghouseStateResponse,
   ExchangeClient,
   HttpTransport,
@@ -100,8 +101,14 @@ export const handler: Handler = async () => {
             ],
           });
         } catch (error) {
-          console.error(`Cancel failed for ${order.coin} ${order.oid}:`, error);
-          continue;
+          if (error instanceof ApiRequestError) {
+            continue;
+          } else {
+            console.error(
+              `Cancel failed for ${order.coin} ${order.oid}:`,
+              error,
+            );
+          }
         }
 
         const currentPosition = updatedPositions.find(
