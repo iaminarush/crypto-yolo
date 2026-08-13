@@ -6,7 +6,8 @@
 		"dev": "vite dev",
 		"build": "vite build && tsc --noEmit",
 		"preview": "vite preview",
-		"start": "node .output/server/index.mjs"
+		"start": "node .output/server/index.mjs",
+		"genDBTypes": "pnpx supabase gen types typescript --project-id lapkwtulywsjfjogngcx --schema public > database.types.ts"
 	},
 	"dependencies": {
 		"@nktkas/hyperliquid": "^0.32.1",
@@ -16,6 +17,7 @@
 		"@tanstack/react-start": "1.168.36",
 		"better-auth": "1.7.0-rc.4",
 		"bignumber.js": "^9.3.1",
+		"ky": "^1.14.2",
 		"pg": "^8.22.0",
 		"react": "^19.0.0",
 		"react-dom": "^19.0.0",
