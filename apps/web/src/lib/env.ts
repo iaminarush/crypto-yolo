@@ -21,24 +21,29 @@ import { createEnv } from "@t3-oss/env-core";
 import { z } from "zod";
 
 export const env = createEnv({
-  server: {
-    WALLET_ADDRESS: z.string().min(1),
-    EXTENDED_API_KEY: z.string().min(1),
-    // Better-auth secret (32+ chars) — e.g. `openssl rand -base64 32`
-    BETTER_AUTH_SECRET: z.string().min(32),
-    // Public base URL of the app, e.g. http://localhost:3000 in dev
-    BETTER_AUTH_URL: z.url(),
-    // Supabase Session pooler connection string (see .env.example)
-    DATABASE_URL: z.url(),
-  },
-  clientPrefix: "VITE_",
-  client: {},
-  runtimeEnv: {
-    // Server context reads process.env; Vite (dev + build) provides
-    // import.meta.env with the VITE_* vars inlined on both sides.
-    ...process.env,
-    ...import.meta.env,
-  },
-  // Treat `VAR=` in .env files as unset instead of a validation failure.
-  emptyStringAsUndefined: true,
+	server: {
+		WALLET_ADDRESS: z.string().min(1),
+		EXTENDED_API_KEY: z.string().min(1),
+		// Better-auth secret (32+ chars) — e.g. `openssl rand -base64 32`
+		BETTER_AUTH_SECRET: z.string().min(32),
+		// Public base URL of the app, e.g. http://localhost:3000 in dev
+		BETTER_AUTH_URL: z.url(),
+		// Supabase Session pooler connection string (see .env.example)
+		DATABASE_URL: z.url(),
+		SUPABASE_KEY: z.string().min(1),
+		RW_KEY: z.string().min(1),
+		// GitHub OAuth app credentials (see .env.example)
+		GITHUB_CLIENT_ID: z.string().min(1),
+		GITHUB_CLIENT_SECRET: z.string().min(1),
+	},
+	clientPrefix: "VITE_",
+	client: {},
+	runtimeEnv: {
+		// Server context reads process.env; Vite (dev + build) provides
+		// import.meta.env with the VITE_* vars inlined on both sides.
+		...process.env,
+		...import.meta.env,
+	},
+	// Treat `VAR=` in .env files as unset instead of a validation failure.
+	emptyStringAsUndefined: true,
 });
