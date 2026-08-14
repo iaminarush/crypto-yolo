@@ -4,6 +4,9 @@ import { getHlData, getRisexData } from "./-positions-server";
 
 export const Route = createFileRoute("/_authenticated/")({
 	component: Home,
+	pendingComponent: HomePending,
+	pendingMs: 150,
+	pendingMinMs: 300,
 	loader: async () => {
 		const [hyperliquid, risex] = await Promise.all([
 			getHlData(),
@@ -127,6 +130,28 @@ function OutOfBoundsCard({
 			) : (
 				<p className="empty">All positions within bounds</p>
 			)}
+		</div>
+	);
+}
+
+function LoadingCard({ exchange }: { exchange: string }) {
+	return (
+		<div className="card">
+			<h2>{exchange}</h2>
+			<p className="empty">
+				<span className="spinner" aria-hidden="true" />
+				Loading positions…
+			</p>
+		</div>
+	);
+}
+
+function HomePending() {
+	return (
+		<div className="grid">
+			<LoadingCard exchange="Extended" />
+			<LoadingCard exchange="Hyperliquid" />
+			<LoadingCard exchange="Risex" />
 		</div>
 	);
 }
