@@ -1,163 +1,103 @@
-import { HttpTransport, InfoClient } from "@nktkas/hyperliquid";
-import { createClient } from "@supabase/supabase-js";
+import {
+	HttpTransport,
+	InfoClient,
+	type MetaResponse,
+} from "@nktkas/hyperliquid";
 import { createServerFn } from "@tanstack/react-start";
-import BigNumber from "bignumber.js";
-import ky from "ky";
-import z from "zod";
-import { ROBOTWEALTH_API, SUPABASE_URL } from "~/lib/constants";
+import BN from "bignumber.js";
+import type { Database } from "~/lib/database.types";
 import { env } from "~/lib/env";
-import { clamp, fetchAndParse } from "~/lib/util";
-import type { Database } from "../../../database.types";
+import { getConfig, getTickers, getWeightsAndVolatilities } from "~/lib/util";
 
 const WALLET = env.WALLET_ADDRESS;
 
-const supabaseUrl = SUPABASE_URL;
-const supabaseKey = env.SUPABASE_KEY;
-const supabase = createClient<Database>(supabaseUrl, supabaseKey);
-
-type TExchangeNames = "extended" | "hyperliquid" | "risex";
-
-export const getConfig = async (exchange: TExchangeNames) => {
-	const { data } = await supabase
-		.from("exchange")
-		.select()
-		.eq("exchange", exchange)
-		.single();
-
-	if (!data) throw new Error("No exchange config in DB");
-
-	if (data.carry_weight + data.momentum_weight + data.trend_weight !== 1)
-		throw new Error("Config weights does not add up to 1");
-
-	return data;
-};
-
-type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
-
-const Weight = z.object({
-	ticker: z.string(),
-	arrival_price: z.number(),
-	carry_megafactor: z.number(),
-	combo_weight: z.number(),
-	momentum_megafactor: z.number(),
-	trend_megafactor: z.number(),
-});
-
-const WeightsSchema = z.object({
-	success: z.boolean(),
-	last_updated: z.number(),
-	data: z.array(Weight),
-});
-
-export const getWeights = async () =>
-	fetchAndParse(
-		() =>
-			ky
-				.get(`${ROBOTWEALTH_API}/weights`, {
-					searchParams: {
-						api_key: env.RW_KEY,
-					},
-				})
-				.json(),
-		WeightsSchema,
-	);
-
-const VolSchema = z.object({
-	data: z.array(
-		z.object({
-			date: z.string(),
-			ewvol: z.number(),
-			ticker: z.string(),
-		}),
-	),
-	last_updated: z.number(),
-	success: z.boolean(),
-});
-
-const getVolatilities = async () =>
-	fetchAndParse(
-		() =>
-			ky
-				.get(`${ROBOTWEALTH_API}/volatilities`, {
-					searchParams: { api_key: env.RW_KEY },
-				})
-				.json(),
-		VolSchema,
-	);
-
-const getTickers = async () => {
-	const { data } = await supabase.from("ticker").select();
-
-	if (!data) throw new Error("No exchange config in DB");
-
-	return data;
-};
-
-export const getWeightsAndVolatilities = async (config: TConfig) => {
-	const weights = await getWeights();
-	const volatilities = await getVolatilities();
-	let totalVol = new BigNumber(0);
-
-	const merged = weights.data.map((w) => {
-		const vol = volatilities.data.find((v) => v.ticker === w.ticker);
-		if (!vol)
-			throw new Error("Non matching ticker between weights and volatilities");
-
-		if (vol.ewvol <= 0)
-			throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
-
-		const inverseVol = new BigNumber(1).div(vol.ewvol);
-		const comboWeight = new BigNumber(w.trend_megafactor)
-			.times(config.trend_weight)
-			.plus(new BigNumber(w.momentum_megafactor).times(config.momentum_weight))
-			.plus(new BigNumber(w.carry_megafactor).times(config.carry_weight));
-
-		const volScaledWeight = BigNumber(
-			clamp(inverseVol.times(comboWeight).toNumber(), -0.25, 0.25),
-		);
-
-		// totalVol = totalVol.plus(Math.abs(volScaledWeight.toNumber()));
-		totalVol = totalVol.plus(volScaledWeight.abs());
-
-		return {
-			...w,
-			ewvol: vol.ewvol,
-			inverseVol,
-			combo_weight: comboWeight,
-			vol_scaled_weight: volScaledWeight,
-		};
-	});
-
-	if (totalVol.gt(1))
-		return merged.map((m) => {
-			const volScaledWeight = new BigNumber(m.vol_scaled_weight).div(totalVol);
-			const dollarAllocation = volScaledWeight.times(config.allocation);
-
-			return {
-				ticker: m.ticker,
-				token_allocation: dollarAllocation.div(m.arrival_price),
-			};
-		});
-	else
-		return merged.map((m) => {
-			const dollarAllocation = new BigNumber(m.vol_scaled_weight).times(
-				config.allocation,
-			);
-			return {
-				ticker: m.ticker,
-				token_allocation: dollarAllocation.div(m.arrival_price),
-			};
-		});
-};
-
-export const getHyperliquidPositions = createServerFn().handler(async () => {
+export const getHLOutOfBounds = createServerFn().handler(async () => {
 	const transport = new HttpTransport();
 	const client = new InfoClient({ transport });
 	const config = await getConfig("hyperliquid");
 	const volAndWeight = await getWeightsAndVolatilities(config);
 	const tickers = await getTickers();
-	const { assetPositions } = await client.clearinghouseState({
+	const { assetPositions: currentPositions } = await client.clearinghouseState({
 		user: WALLET,
 	});
 	const meta = await client.meta();
+	const allMids = await client.allMids();
+
+	const desiredPositions = getHLTarget(
+		volAndWeight,
+		tickers,
+		config,
+		meta.universe,
+	);
+
+	const result = [];
+
+	for (const dp of desiredPositions) {
+		const currentSize = BN(
+			currentPositions.find((cp) => cp.position.coin === dp.exchangeTicker)
+				?.position.szi || 0,
+		);
+
+		if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
+			continue;
+		}
+
+		const position = currentPositions.find(
+			(cp) => cp.position.coin === dp.exchangeTicker,
+		)?.position;
+		const size = BN(position?.szi || 0);
+		const midPrice = allMids[dp.exchangeTicker];
+		const gapToLower = size.minus(dp.lowerBound).abs();
+		const gapToUpper = dp.upperBound.minus(size).abs();
+		const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
+		const priceGap = gap.times(midPrice).toNumber();
+
+		result.push({ ticker: dp.rwTicker, priceGap });
+	}
+	return result;
 });
+
+function getHLMinOrderSizeChange(szDecimals: number): BN {
+	return new BN(1).dividedBy(new BN(10).pow(szDecimals));
+}
+
+const getHLTarget = (
+	volAndWeight: Awaited<ReturnType<typeof getWeightsAndVolatilities>>,
+	tickers: Awaited<ReturnType<typeof getTickers>>,
+	config: Database["public"]["Tables"]["exchange"]["Row"],
+	markets: MetaResponse["universe"],
+) => {
+	const tickerMap = new Map(
+		tickers
+			.filter((t) => markets.some((m) => m.name === t.hyperliquid_ticker))
+			.map((t) => [t.rbw_ticker, t.hyperliquid_ticker]),
+	);
+
+	return volAndWeight.map((vw) => {
+		const exchangeTicker = tickerMap.get(vw.ticker);
+		if (!exchangeTicker)
+			throw new Error(`No hyperliquid ticker for ${vw.ticker}`);
+
+		const tokenAllocation = vw.token_allocation;
+
+		const isPositive = tokenAllocation.gte(0);
+
+		const market = markets.find((m) => m.name === exchangeTicker);
+
+		return {
+			rwTicker: vw.ticker,
+			exchangeTicker,
+			desiredSize: tokenAllocation,
+			upperBound: tokenAllocation.times(
+				BN(isPositive ? config.trade_buffer : -config.trade_buffer).plus(1),
+			),
+			lowerBound: tokenAllocation.times(
+				BN(isPositive ? -config.trade_buffer : config.trade_buffer).plus(1),
+			),
+			minOrderSizeChange: market
+				? getHLMinOrderSizeChange(market.szDecimals)
+				: BN(0),
+			szDecimals: market ? market.szDecimals : 1,
+		};
+	});
+};
