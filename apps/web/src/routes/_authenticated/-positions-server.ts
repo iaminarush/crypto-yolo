@@ -1,19 +1,30 @@
 import {
+	InfoClient as HLInfoClient,
 	HttpTransport,
-	InfoClient,
 	type MetaResponse,
 } from "@nktkas/hyperliquid";
 import { createServerFn } from "@tanstack/react-start";
 import BN from "bignumber.js";
+import {
+	formatWad,
+	type Market,
+	InfoClient as RisexInfoClient,
+} from "risex-client";
 import type { Database } from "~/lib/database.types";
 import { env } from "~/lib/env";
-import { getConfig, getTickers, getWeightsAndVolatilities } from "~/lib/util";
+import {
+	getConfig,
+	getDemeanedWeightsAndVols,
+	getTickers,
+	getWeights,
+	getWeightsAndVolatilities,
+} from "~/lib/util";
 
 const WALLET = env.WALLET_ADDRESS;
 
-export const getHLOutOfBounds = createServerFn().handler(async () => {
+export const getHlData = createServerFn().handler(async () => {
 	const transport = new HttpTransport();
-	const client = new InfoClient({ transport });
+	const client = new HLInfoClient({ transport });
 	const config = await getConfig("hyperliquid");
 	const volAndWeight = await getWeightsAndVolatilities(config);
 	const tickers = await getTickers();
@@ -98,6 +109,97 @@ const getHLTarget = (
 				? getHLMinOrderSizeChange(market.szDecimals)
 				: BN(0),
 			szDecimals: market ? market.szDecimals : 1,
+		};
+	});
+};
+
+export const getRisexData = createServerFn().handler(async () => {
+	const info = new RisexInfoClient({ baseUrl: "https://api.rise.trade" });
+	const config = await getConfig("risex");
+	const weights = await getWeights();
+	const markets = await info.getMarkets();
+	const tickers = await getTickers();
+
+	const currentPositions = await info.getAllPositions(WALLET);
+
+	const filteredMarkets = tickers
+		.filter(
+			(t) =>
+				markets.some((m) => m.market_id === t.risex_ticker) &&
+				weights.data.some((w) => w.ticker === t.rbw_ticker),
+		)
+		.map((fm) => fm.rbw_ticker);
+
+	const volAndWeight = await getDemeanedWeightsAndVols(config, filteredMarkets);
+
+	const desiredPositions = getRisexTarget(
+		volAndWeight,
+		tickers,
+		config,
+		markets,
+	);
+
+	const result = [];
+
+	for (const dp of desiredPositions) {
+		const position = currentPositions.find(
+			(cp) => cp.market_id === dp.exchangeTicker,
+		);
+		const currentSize = BN(position?.size ? formatWad(position.size) : 0);
+
+		if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
+			continue;
+		}
+
+		const book = await info.getOrderbook(Number(dp.exchangeTicker));
+		const midPrice =
+			(Number(book.bids[0].price) + Number(book.asks[0].price)) / 2;
+		const gapToLower = currentSize.minus(dp.lowerBound).abs();
+		const gapToUpper = dp.upperBound.minus(currentSize).abs();
+		const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
+		const priceGap = gap.times(midPrice).toNumber();
+
+		result.push({ ticker: dp.rwTicker, priceGap });
+	}
+	return result;
+});
+
+const getRisexTarget = (
+	volAndWeight: Awaited<ReturnType<typeof getDemeanedWeightsAndVols>>,
+	tickers: Awaited<ReturnType<typeof getTickers>>,
+	config: Database["public"]["Tables"]["exchange"]["Row"],
+	markets: Market[],
+) => {
+	const tickerMap = new Map(
+		tickers
+			.filter((t) => markets.some((m) => m.market_id === t.risex_ticker))
+			.map((t) => [t.rbw_ticker, t.risex_ticker]),
+	);
+
+	return volAndWeight.map((vw) => {
+		const exchangeTicker = tickerMap.get(vw.ticker);
+		if (!exchangeTicker) throw new Error(`No risex ticker for ${vw.ticker}`);
+
+		const tokenAllocation = vw.token_allocation;
+
+		const isPositive = tokenAllocation.gte(0);
+
+		const market = markets.find((m) => m.market_id === exchangeTicker);
+		if (!market) throw new Error(`No risex market for ${vw.ticker}`);
+
+		return {
+			rwTicker: vw.ticker,
+			exchangeTicker,
+			desiredSize: tokenAllocation,
+			upperBound: tokenAllocation.times(
+				BN(isPositive ? config.trade_buffer : -config.trade_buffer).plus(1),
+			),
+			lowerBound: tokenAllocation.times(
+				BN(isPositive ? -config.trade_buffer : config.trade_buffer).plus(1),
+			),
+			minOrdersize: market.config.min_order_size,
+			stepSize: market.config.step_size,
+			stepPrice: market.config.step_price,
 		};
 	});
 };

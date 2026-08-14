@@ -165,3 +165,94 @@ export const getWeightsAndVolatilities = async (config: TConfig) => {
 			};
 		});
 };
+
+export const getDemeanedWeightsAndVols = async (
+	config: TConfig,
+	universe: string[],
+) => {
+	const weights = await getWeights();
+	const volatilities = await getVolatilities();
+	let totalVol = new BigNumber(0);
+
+	const filteredWeights = weights.data.filter((w) =>
+		universe.includes(w.ticker),
+	);
+
+	const averageMomentum =
+		filteredWeights.reduce((sum, v) => sum + v.momentum_megafactor, 0) /
+		filteredWeights.length;
+
+	const absSumMomentum = filteredWeights.reduce(
+		(sum, v) => sum.plus(Math.abs(v.momentum_megafactor)),
+		BigNumber(0),
+	);
+
+	const averageCarry =
+		filteredWeights.reduce((sum, v) => sum + v.carry_megafactor, 0) /
+		filteredWeights.length;
+
+	const absSumCarry = filteredWeights.reduce(
+		(sum, v) => sum.plus(Math.abs(v.carry_megafactor)),
+		BigNumber(0),
+	);
+
+	const merged = filteredWeights.map((w) => {
+		const vol = volatilities.data.find((v) => v.ticker === w.ticker);
+		if (!vol)
+			throw new Error("Non matching ticker between weights and volatilities");
+
+		if (vol.ewvol <= 0)
+			throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
+
+		const demeanedMomo = BigNumber(w.momentum_megafactor)
+			.minus(averageMomentum)
+			.div(absSumMomentum);
+
+		const demeanedCarry = BigNumber(w.carry_megafactor)
+			.minus(averageCarry)
+			.div(absSumCarry);
+
+		const adjustedTrend = BigNumber(w.trend_megafactor)
+			.times(10)
+			.div(filteredWeights.length);
+
+		const inverseVol = new BigNumber(1).div(vol.ewvol);
+		const comboWeight = new BigNumber(adjustedTrend)
+			.times(config.trend_weight)
+			.plus(new BigNumber(demeanedMomo).times(config.momentum_weight))
+			.plus(new BigNumber(demeanedCarry).times(config.carry_weight));
+
+		const volScaledWeight = BigNumber(
+			clamp(inverseVol.times(comboWeight).toNumber(), -0.25, 0.25),
+		);
+
+		totalVol = totalVol.plus(volScaledWeight.abs());
+		return {
+			...w,
+			ewvol: vol.ewvol,
+			inverseVol,
+			combo_weight: comboWeight,
+			vol_scaled_weight: volScaledWeight,
+		};
+	});
+	if (totalVol.gt(1))
+		return merged.map((m) => {
+			const volScaledWeight = new BigNumber(m.vol_scaled_weight).div(totalVol);
+			const dollarAllocation = volScaledWeight.times(config.allocation);
+
+			return {
+				ticker: m.ticker,
+				token_allocation: dollarAllocation.div(m.arrival_price),
+			};
+		});
+	else
+		return merged.map((m) => {
+			const dollarAllocation = new BigNumber(m.vol_scaled_weight).times(
+				config.allocation,
+			);
+			return {
+				ticker: m.ticker,
+				token_allocation: dollarAllocation.div(m.arrival_price),
+			};
+		});
+};
