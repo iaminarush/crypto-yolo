@@ -7,7 +7,7 @@
 		"build": "vite build && tsc --noEmit",
 		"preview": "vite preview",
 		"start": "node .output/server/index.mjs",
-		"genDBTypes": "pnpx supabase gen types typescript --project-id lapkwtulywsjfjogngcx --schema public > database.types.ts"
+		"genDBTypes": "pnpx supabase gen types typescript --project-id lapkwtulywsjfjogngcx --schema public > src/lib/database.types.ts"
 	},
 	"dependencies": {
 		"@nktkas/hyperliquid": "^0.32.1",
