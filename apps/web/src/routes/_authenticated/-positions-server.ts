@@ -5,6 +5,7 @@ import {
 } from "@nktkas/hyperliquid";
 import { createServerFn } from "@tanstack/react-start";
 import BN from "bignumber.js";
+import ccxt from "ccxt";
 import {
 	formatWad,
 	type Market,
@@ -203,3 +204,13 @@ const getRisexTarget = (
 		};
 	});
 };
+
+export const getExtendedData = createServerFn().handler(async () => {
+	const client = new ccxt.extended();
+	const config = await getConfig("extended");
+	const volAndWeight = await getWeightsAndVolatilities(config);
+	const tickers = await getTickers();
+	const currentPositions = await client.v1PublicGetInfoMarkets();
+	const rawMarkets = await getMarkets();
+	const markets = rawMarkets.filter((m) => m.status === "ACTIVE");
+});
