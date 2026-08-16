@@ -5,11 +5,11 @@ import {
 } from "@nktkas/hyperliquid";
 import { createServerFn } from "@tanstack/react-start";
 import BN from "bignumber.js";
-import ccxt, { MarketInterface } from "ccxt";
+import ccxt, { type MarketInterface } from "ccxt";
 import {
   formatWad,
-  type Market as RisexMarket,
   InfoClient as RisexInfoClient,
+  type Market as RisexMarket,
 } from "risex-client";
 import type { Database } from "~/lib/database.types";
 import { env } from "~/lib/env";
@@ -219,7 +219,41 @@ export const getExtendedData = createServerFn().handler(async () => {
     (m) => m?.active === true,
   ) as MarketInterface[];
 
-  return markets;
+  const desiredPositions = getExtendedTarget(
+    volAndWeight,
+    tickers,
+    config,
+    markets,
+  );
+
+  const result = [];
+
+  for (const dp of desiredPositions) {
+    const position = currentPositions.find(
+      (cp) => cp.info.market === dp.exchangeTicker,
+    );
+    const currentSize = BN(position?.contracts ?? 0).multipliedBy(
+      position?.side === "short" ? -1 : 1,
+    );
+
+    if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
+      continue;
+    }
+
+    const marketStats = markets.find((m) => m.id === dp.exchangeTicker)?.info
+      .marketStats;
+    const askPrice = BN(marketStats.askPrice ?? 0);
+    const bidPrice = BN(marketStats.bidPrice ?? 0);
+    const midPrice = askPrice.plus(bidPrice).div(2);
+    const gapToLower = currentSize.minus(dp.lowerBound).abs();
+    const gapToUpper = dp.upperBound.minus(currentSize).abs();
+    const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
+    const priceGap = gap.times(midPrice).toNumber();
+
+    result.push({ ticker: dp.rwTicker, priceGap });
+  }
+
+  return result;
 });
 
 const getExtendedTarget = (
@@ -246,7 +280,7 @@ const getExtendedTarget = (
 
     return {
       rwTicker: vw.ticker,
-      extendedTicker,
+      exchangeTicker: extendedTicker,
       desiredSize: tokenAllocation,
       upperBound: tokenAllocation.times(
         BN(isPositive ? config.trade_buffer : -config.trade_buffer).plus(1),
@@ -254,10 +288,8 @@ const getExtendedTarget = (
       lowerBound: tokenAllocation.times(
         BN(isPositive ? -config.trade_buffer : config.trade_buffer).plus(1),
       ),
-      minOrdersize: market ? BN(market.contractSize ?? 0) : BigNumber(0),
-      minOrdersizeChange: market
-        ? BN(market.precision.amount ?? 0)
-        : BigNumber(0),
+      minOrdersize: market ? BN(market.contractSize ?? 0) : BN(0),
+      minOrdersizeChange: market ? BN(market.precision.amount ?? 0) : BN(0),
     };
   });
 };

@@ -225,3 +225,37 @@ th {
 	color: var(--text);
 	border-color: var(--muted);
 }
+
+.debug-button {
+	margin-bottom: 12px;
+	padding: 6px 14px;
+	font-size: 13px;
+	color: var(--text);
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	cursor: pointer;
+}
+
+.debug-button:hover:not(:disabled) {
+	color: var(--accent);
+	border-color: var(--accent);
+}
+
+.debug-button:disabled {
+	opacity: 0.6;
+	cursor: wait;
+}
+
+.debug-output {
+	max-height: 420px;
+	overflow: auto;
+	margin: 0;
+	padding: 12px;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 12px;
+	line-height: 1.5;
+}
