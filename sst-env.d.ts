@@ -54,6 +54,15 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "URL_LAMBDA_KEY": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "UrlTradeDispatcher": {
+      "name": string
+      "type": "sst.aws.Function"
+      "url": string
+    }
     "notifier": {
       "name": string
       "type": "sst.aws.Function"
