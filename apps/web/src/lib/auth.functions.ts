@@ -12,20 +12,20 @@ const withHeaders = createMiddleware().server(async ({ request, next }) => {
 	return next({ context: { headers: request.headers } });
 });
 
+/** Middleware that rejects unauthenticated requests. */
+export const requireAuth = createMiddleware().server(
+	async ({ request, next }) => {
+		const session = await auth.api.getSession({ headers: request.headers });
+		if (!session) {
+			throw new Error("Unauthorized");
+		}
+		return next();
+	},
+);
+
 /** Returns the session for the current request, or null when signed out. */
 export const getSession = createServerFn({ method: "GET" })
 	.middleware([withHeaders])
 	.handler(async ({ context }) => {
 		return auth.api.getSession({ headers: context.headers });
-	});
-
-/** Like getSession, but throws when the request is unauthenticated. */
-export const ensureSession = createServerFn({ method: "GET" })
-	.middleware([withHeaders])
-	.handler(async ({ context }) => {
-		const session = await auth.api.getSession({ headers: context.headers });
-		if (!session) {
-			throw new Error("Unauthorized");
-		}
-		return session;
 	});
