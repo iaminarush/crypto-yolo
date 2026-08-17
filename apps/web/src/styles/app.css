@@ -83,6 +83,12 @@ h1 {
 	margin: 0 0 12px;
 }
 
+.card-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 12px;
+}
+
 .badge {
 	display: inline-block;
 	font-size: 11px;
