@@ -1,6 +1,13 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { getExtendedData, getHlData, getRisexData } from "./-positions-server";
+import {
+	type EXCHANGES,
+	getExtendedData,
+	getHlData,
+	getRisexData,
+	triggerTrade,
+} from "./-positions-server";
 
 export const Route = createFileRoute("/_authenticated/")({
 	component: Home,
@@ -8,16 +15,31 @@ export const Route = createFileRoute("/_authenticated/")({
 	pendingMs: 150,
 	pendingMinMs: 300,
 	loader: async () => {
+		// One exchange failing shouldn't blank the whole dashboard.
+		const orNull = <T,>(fn: () => Promise<T>): Promise<T | null> =>
+			fn().catch((e) => {
+				console.error(e);
+				return null;
+			});
+
 		const [extended, hyperliquid, risex] = await Promise.all([
-			getExtendedData(),
-			getHlData(),
-			getRisexData(),
+			orNull(getExtendedData),
+			orNull(getHlData),
+			orNull(getRisexData),
 		]);
 		return { extended, hyperliquid, risex };
 	},
 });
 
+type Exchange = (typeof EXCHANGES)[number];
+
 type OutOfBoundsPosition = Awaited<ReturnType<typeof getHlData>>[number];
+
+const EXCHANGE_LABELS: Record<Exchange, string> = {
+	extended: "Extended",
+	hyperliquid: "Hyperliquid",
+	risex: "Risex",
+};
 
 const usd = new Intl.NumberFormat("en-US", {
 	style: "currency",
@@ -26,15 +48,62 @@ const usd = new Intl.NumberFormat("en-US", {
 
 function OutOfBoundsCard({
 	exchange,
-	positions,
+	load,
+	initialPositions,
 }: {
-	exchange: string;
-	positions: OutOfBoundsPosition[];
+	exchange: Exchange;
+	load: () => Promise<OutOfBoundsPosition[]>;
+	initialPositions: OutOfBoundsPosition[] | null;
 }) {
+	const [positions, setPositions] = useState(initialPositions);
+	const [refreshing, setRefreshing] = useState(false);
+	const [triggering, setTriggering] = useState(false);
+
+	const handleRefresh = async () => {
+		setRefreshing(true);
+		try {
+			setPositions(await load());
+		} catch (e) {
+			console.error(e);
+		} finally {
+			setRefreshing(false);
+		}
+	};
+
+	const handleTrigger = async () => {
+		setTriggering(true);
+		try {
+			await triggerTrade({ data: { exchange } });
+		} catch (e) {
+			console.error(e);
+		} finally {
+			setTriggering(false);
+		}
+	};
+
+	if (positions === null) {
+		return (
+			<div className="card">
+				<h2>{EXCHANGE_LABELS[exchange]}</h2>
+				<p className="empty">Error loading positions</p>
+				<div className="card-actions">
+					<button
+						type="button"
+						className="debug-button"
+						onClick={handleRefresh}
+						disabled={refreshing}
+					>
+						{refreshing ? "Refreshing…" : "Refresh"}
+					</button>
+				</div>
+			</div>
+		);
+	}
+
 	return (
 		<div className="card">
 			<h2>
-				{exchange}
+				{EXCHANGE_LABELS[exchange]}
 				<span className={positions.length > 0 ? "badge err" : "badge ok"}>
 					{positions.length > 0
 						? `${positions.length} out of bounds`
@@ -61,6 +130,24 @@ function OutOfBoundsCard({
 			) : (
 				<p className="empty">All positions within bounds</p>
 			)}
+			<div className="card-actions">
+				<button
+					type="button"
+					className="debug-button"
+					onClick={handleRefresh}
+					disabled={refreshing}
+				>
+					{refreshing ? "Refreshing…" : "Refresh"}
+				</button>
+				<button
+					type="button"
+					className="debug-button"
+					onClick={handleTrigger}
+					disabled={triggering}
+				>
+					{triggering ? "Triggering…" : "Trigger rebalance"}
+				</button>
+			</div>
 		</div>
 	);
 }
@@ -87,13 +174,32 @@ function HomePending() {
 	);
 }
 
+const fetchByExchange: Record<Exchange, () => Promise<OutOfBoundsPosition[]>> =
+	{
+		extended: getExtendedData,
+		hyperliquid: getHlData,
+		risex: getRisexData,
+	};
+
 function Home() {
 	const { extended, hyperliquid, risex } = Route.useLoaderData();
 	return (
 		<div className="grid">
-			<OutOfBoundsCard exchange="Extended" positions={extended} />
-			<OutOfBoundsCard exchange="Hyperliquid" positions={hyperliquid} />
-			<OutOfBoundsCard exchange="Risex" positions={risex} />
+			<OutOfBoundsCard
+				exchange="extended"
+				load={fetchByExchange.extended}
+				initialPositions={extended}
+			/>
+			<OutOfBoundsCard
+				exchange="hyperliquid"
+				load={fetchByExchange.hyperliquid}
+				initialPositions={hyperliquid}
+			/>
+			<OutOfBoundsCard
+				exchange="risex"
+				load={fetchByExchange.risex}
+				initialPositions={risex}
+			/>
 		</div>
 	);
 }
