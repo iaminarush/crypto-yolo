@@ -32,6 +32,8 @@ export const env = createEnv({
 		DATABASE_URL: z.url(),
 		SUPABASE_KEY: z.string().min(1),
 		RW_KEY: z.string().min(1),
+		LAMBDA_URL: z.url(),
+		URL_LAMBDA_KEY: z.string().min(1),
 		// GitHub OAuth app credentials (see .env.example)
 		GITHUB_CLIENT_ID: z.string().min(1),
 		GITHUB_CLIENT_SECRET: z.string().min(1),
