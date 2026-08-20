@@ -6,14 +6,20 @@
 		"dev": "vite dev",
 		"build": "vite build && tsc --noEmit",
 		"preview": "vite preview",
-		"start": "node .output/server/index.mjs"
+		"start": "node .output/server/index.mjs",
+		"genDBTypes": "pnpx supabase gen types typescript --project-id lapkwtulywsjfjogngcx --schema public > src/lib/database.types.ts"
 	},
 	"dependencies": {
 		"@nktkas/hyperliquid": "^0.32.1",
 		"@supabase/supabase-js": "^2.90.1",
+		"@t3-oss/env-core": "^0.13.11",
 		"@tanstack/react-router": "1.170.19",
 		"@tanstack/react-start": "1.168.36",
+		"better-auth": "1.7.0-rc.4",
 		"bignumber.js": "^9.3.1",
+		"ccxt": "^4.5.71",
+		"ky": "^1.14.2",
+		"pg": "^8.22.0",
 		"react": "^19.0.0",
 		"react-dom": "^19.0.0",
 		"risex-client": "^0.1.11",
@@ -21,6 +27,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "^25.0.10",
+		"@types/pg": "^8.20.4",
 		"@types/react": "^19.0.8",
 		"@types/react-dom": "^19.0.3",
 		"@vitejs/plugin-react": "^6.0.1",

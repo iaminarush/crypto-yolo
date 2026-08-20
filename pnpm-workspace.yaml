@@ -2,6 +2,8 @@ packages:
   - apps/*
 allowBuilds:
   aws-sdk: true
+  bufferutil: true
+  ccxt: true
   esbuild: true
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
