@@ -1,121 +1,133 @@
 /// <reference path="./.sst/platform/config.d.ts" />
 
 export default $config({
-  app(input) {
-    return {
-      name: "extended-yolo",
-      home: "aws",
-      removal: input?.stage === "production" ? "retain" : "remove",
-      protect: ["production"].includes(input?.stage),
-      providers: {
-        aws: {
-          profile: "admin",
-        },
-      },
-    };
-  },
-  async run() {
-    const rwKey = new sst.Secret("ROBOTWEALTH_KEY");
-    const supabaseKey = new sst.Secret("SUPABASE_KEY");
-    const telegramToken = new sst.Secret("TELEGRAM_TOKEN");
-    const telegramId = new sst.Secret("TELEGRAM_ID");
+	app(input) {
+		return {
+			name: "extended-yolo",
+			home: "aws",
+			removal: input?.stage === "production" ? "retain" : "remove",
+			protect: ["production"].includes(input?.stage),
+			providers: {
+				aws: {
+					profile: "admin",
+				},
+			},
+		};
+	},
+	async run() {
+		const rwKey = new sst.Secret("ROBOTWEALTH_KEY");
+		const supabaseKey = new sst.Secret("SUPABASE_KEY");
+		const telegramToken = new sst.Secret("TELEGRAM_TOKEN");
+		const telegramId = new sst.Secret("TELEGRAM_ID");
 
-    const extendedApiKey = new sst.Secret("EXTENDED_API_KEY");
-    const extendedStarkexKey = new sst.Secret("EXTENDED_STARKEX_KEY");
-    const extendedLambdaKey = new sst.Secret("EXTENDED_LAMBDA_KEY");
+		const extendedApiKey = new sst.Secret("EXTENDED_API_KEY");
+		const extendedStarkexKey = new sst.Secret("EXTENDED_STARKEX_KEY");
+		const extendedLambdaKey = new sst.Secret("EXTENDED_LAMBDA_KEY");
 
-    const hyperliquidWallet = new sst.Secret("HYPERLIQUID_WALLET");
-    const hyperliquidKey = new sst.Secret("HYPERLIQUID_KEY");
+		const hyperliquidWallet = new sst.Secret("HYPERLIQUID_WALLET");
+		const hyperliquidKey = new sst.Secret("HYPERLIQUID_KEY");
 
-    const risexApiKey = new sst.Secret("RISEX_API_KEY");
+		const risexApiKey = new sst.Secret("RISEX_API_KEY");
 
-    const errorTopic = new sst.aws.SnsTopic("FailureTopic");
+		const urlLambdaKey = new sst.Secret("URL_LAMBDA_KEY");
 
-    const stage = $app.stage;
+		const errorTopic = new sst.aws.SnsTopic("FailureTopic");
 
-    const notifier = new sst.aws.Function("notifier", {
-      handler: "src/notifier.handler",
-      link: [telegramToken, telegramId],
-      runtime: "nodejs24.x",
-    });
+		const stage = $app.stage;
 
-    errorTopic.subscribe("FailureSubscriber", notifier.arn);
+		const notifier = new sst.aws.Function("notifier", {
+			handler: "src/notifier.handler",
+			link: [telegramToken, telegramId],
+			runtime: "nodejs24.x",
+		});
 
-    const extendedWorker = new sst.aws.Function("tradeExtended", {
-      handler: "src/trade-extended.handler",
-      link: [
-        rwKey,
-        supabaseKey,
-        extendedApiKey,
-        extendedStarkexKey,
-        telegramToken,
-        telegramId,
-        extendedLambdaKey,
-      ],
-      timeout: "15 minutes",
-      runtime: "nodejs24.x",
-      nodejs: { install: ["@x10xchange/stark-crypto-wrapper-wasm"] },
-    });
+		errorTopic.subscribe("FailureSubscriber", notifier.arn);
 
-    const hyperliquidWorker = new sst.aws.Function("tradeHyperliquid", {
-      handler: "src/trade-hyperliquid.handler",
-      link: [
-        rwKey,
-        supabaseKey,
-        telegramToken,
-        telegramId,
-        hyperliquidWallet,
-        hyperliquidKey,
-      ],
-      timeout: "15 minutes",
-      runtime: "nodejs24.x",
-    });
+		const extendedWorker = new sst.aws.Function("tradeExtended", {
+			handler: "src/trade-extended.handler",
+			link: [
+				rwKey,
+				supabaseKey,
+				extendedApiKey,
+				extendedStarkexKey,
+				telegramToken,
+				telegramId,
+				extendedLambdaKey,
+			],
+			timeout: "15 minutes",
+			runtime: "nodejs24.x",
+			nodejs: { install: ["@x10xchange/stark-crypto-wrapper-wasm"] },
+		});
 
-    const risexWorker = new sst.aws.Function("tradeRisex", {
-      handler: "src/trade-risex.handler",
-      link: [
-        rwKey,
-        supabaseKey,
-        hyperliquidWallet,
-        risexApiKey,
-        telegramToken,
-        telegramId,
-      ],
-      timeout: "15 minutes",
-      runtime: "nodejs24.x",
-    });
+		const hyperliquidWorker = new sst.aws.Function("tradeHyperliquid", {
+			handler: "src/trade-hyperliquid.handler",
+			link: [
+				rwKey,
+				supabaseKey,
+				telegramToken,
+				telegramId,
+				hyperliquidWallet,
+				hyperliquidKey,
+			],
+			timeout: "15 minutes",
+			runtime: "nodejs24.x",
+		});
 
-    new aws.cloudwatch.MetricAlarm("WorkerErrorAlarm", {
-      comparisonOperator: "GreaterThanOrEqualToThreshold",
-      evaluationPeriods: 1,
-      metricName: "Errors",
-      namespace: "AWS/Lambda",
-      period: 60,
-      statistic: "Sum",
-      threshold: 1,
-      treatMissingData: "notBreaching",
-      alarmActions: [errorTopic.arn],
-      dimensions: {
-        FunctionName: extendedWorker.name,
-      },
-    });
+		const risexWorker = new sst.aws.Function("tradeRisex", {
+			handler: "src/trade-risex.handler",
+			link: [
+				rwKey,
+				supabaseKey,
+				hyperliquidWallet,
+				risexApiKey,
+				telegramToken,
+				telegramId,
+			],
+			timeout: "15 minutes",
+			runtime: "nodejs24.x",
+		});
 
-    const timestampChecker = new sst.aws.Function("TimestampChecker", {
-      handler: "src/timestamp-checker.handler",
-      link: [
-        rwKey,
-        supabaseKey,
-        extendedWorker,
-        hyperliquidWorker,
-        risexWorker,
-      ],
-      runtime: "nodejs24.x",
-    });
+		new sst.aws.Function("UrlTradeDispatcher", {
+			handler: "src/url-trade-dispatcher.handler",
+			link: [urlLambdaKey, extendedWorker, hyperliquidWorker, risexWorker],
+			url: {
+				authorization: "none",
+				cors: false,
+			},
+			runtime: "nodejs24.x",
+		});
 
-    new sst.aws.CronV2("TimestampCheck", {
-      schedule: "cron(5-30/5 9 * * ? *)",
-      job: timestampChecker.arn,
-      enabled: stage !== "dev",
-    });
-  },
+		new aws.cloudwatch.MetricAlarm("WorkerErrorAlarm", {
+			comparisonOperator: "GreaterThanOrEqualToThreshold",
+			evaluationPeriods: 1,
+			metricName: "Errors",
+			namespace: "AWS/Lambda",
+			period: 60,
+			statistic: "Sum",
+			threshold: 1,
+			treatMissingData: "notBreaching",
+			alarmActions: [errorTopic.arn],
+			dimensions: {
+				FunctionName: extendedWorker.name,
+			},
+		});
+
+		const timestampChecker = new sst.aws.Function("TimestampChecker", {
+			handler: "src/timestamp-checker.handler",
+			link: [
+				rwKey,
+				supabaseKey,
+				extendedWorker,
+				hyperliquidWorker,
+				risexWorker,
+			],
+			runtime: "nodejs24.x",
+		});
+
+		new sst.aws.CronV2("TimestampCheck", {
+			schedule: "cron(5-30/5 9 * * ? *)",
+			job: timestampChecker.arn,
+			enabled: stage !== "dev",
+		});
+	},
 });

@@ -1,10 +1,5 @@
 /// <reference types="vite/client" />
-import {
-	HeadContent,
-	Link,
-	Scripts,
-	createRootRoute,
-} from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import type * as React from "react";
 import appCss from "~/styles/app.css?url";
 
@@ -17,7 +12,7 @@ export const Route = createRootRoute({
 				content: "width=device-width, initial-scale=1",
 			},
 			{
-				title: "Robot Wealth | Positions",
+				title: "Crypto YOLO | Positions",
 			},
 			{
 				name: "description",
@@ -37,18 +32,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<HeadContent />
 			</head>
 			<body>
-				<nav className="nav">
-					<div className="nav-brand">Robot Wealth YOLO</div>
-					<Link
-						to="/"
-						activeProps={{ className: "nav-link active" }}
-						activeOptions={{ exact: true }}
-						className="nav-link"
-					>
-						Positions
-					</Link>
-				</nav>
-				<main className="main">{children}</main>
+				{children}
 				<Scripts />
 			</body>
 		</html>
