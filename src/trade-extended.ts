@@ -12,234 +12,234 @@ import { getOrders } from "./extended/api/orders";
 import { getPositions, type Position } from "./extended/api/positions";
 import { createLimitOrder } from "./extended/create-limit-order.ts";
 import { createMarketOrder } from "./extended/create-market-order.ts";
+import { createRFQMarketOrder } from "./extended/create-rfq-market-order.ts";
 import { init } from "./extended/init";
 import { Decimal } from "./extended/utils/number";
 import { roundToMinChange } from "./extended/utils/round-to-min-change.ts";
 import { sendTelegramMessage } from "./util.ts";
-import { createRFQMarketOrder } from "./extended/create-rfq-market-order.ts";
 
 const SLEEP_MS = 1000;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 
 export const handler: Handler = async () => {
-  try {
-    await init();
-    const startTime = Date.now();
+	try {
+		await init();
+		const startTime = Date.now();
 
-    sendTelegramMessage("Extended Lambda Started").catch(console.error);
+		sendTelegramMessage("Extended Lambda Started").catch(console.error);
 
-    const config = await getConfig("extended");
-    const volAndWeight = await getWeightsAndVolatilities(config);
-    const tickers = await getTickers();
-    const currentPositions = await getPositions();
-    const rawMarkets = await getMarkets();
-    const markets = rawMarkets.filter((m) => m.status === "ACTIVE");
+		const config = await getConfig("extended");
+		const volAndWeight = await getWeightsAndVolatilities(config);
+		const tickers = await getTickers();
+		const currentPositions = await getPositions();
+		const rawMarkets = await getMarkets();
+		const markets = rawMarkets.filter((m) => m.status === "ACTIVE");
 
-    const desiredPositions = calculateDesiredPositions(
-      volAndWeight,
-      tickers,
-      config,
-      markets,
-    );
+		const desiredPositions = calculateDesiredPositions(
+			volAndWeight,
+			tickers,
+			config,
+			markets,
+		);
 
-    const tickersToRebalance = filterTickersToRebalance(
-      desiredPositions,
-      currentPositions,
-    );
+		const tickersToRebalance = filterTickersToRebalance(
+			desiredPositions,
+			currentPositions,
+		);
 
-    // return Array.from(tickersToRebalance.values());
+		// return Array.from(tickersToRebalance.values());
 
-    while (
-      Date.now() - startTime < MAX_RUNTIME_MS &&
-      tickersToRebalance.size > 0
-    ) {
-      for (const [ticker, desiredPosition] of tickersToRebalance) {
-        if (desiredPosition.isRfq) {
-          tickersToRebalance.delete(ticker);
-          continue;
-        }
-        const order = await getOrders({ marketsNames: [ticker] });
-        if (order.length === 0) {
-          const updatedPositions = await getPositions();
-          const currentPosition = updatedPositions.find(
-            (p) => p.market === ticker,
-          );
-          const { size, side } = calculateOrderSize(
-            desiredPosition,
-            currentPosition
-              ? currentPosition.size.times(
-                  currentPosition.side === "LONG" ? 1 : -1,
-                )
-              : BigNumber(0),
-          );
+		while (
+			Date.now() - startTime < MAX_RUNTIME_MS &&
+			tickersToRebalance.size > 0
+		) {
+			for (const [ticker, desiredPosition] of tickersToRebalance) {
+				if (desiredPosition.isRfq) {
+					tickersToRebalance.delete(ticker);
+					continue;
+				}
+				const order = await getOrders({ marketsNames: [ticker] });
+				if (order.length === 0) {
+					const updatedPositions = await getPositions();
+					const currentPosition = updatedPositions.find(
+						(p) => p.market === ticker,
+					);
+					const { size, side } = calculateOrderSize(
+						desiredPosition,
+						currentPosition
+							? currentPosition.size.times(
+									currentPosition.side === "LONG" ? 1 : -1,
+								)
+							: BigNumber(0),
+					);
 
-          if (size.gt(0)) {
-            const limitOrder = await createLimitOrder({
-              ticker,
-              size,
-              side,
-            });
+					if (size.gt(0)) {
+						const limitOrder = await createLimitOrder({
+							ticker,
+							size,
+							side,
+						});
 
-            if (limitOrder.status === "skipped") {
-              tickersToRebalance.delete(ticker);
-            }
-          } else {
-            tickersToRebalance.delete(ticker);
-          }
-        } else {
-          const existingOrder = order[0];
+						if (limitOrder.status === "skipped") {
+							tickersToRebalance.delete(ticker);
+						}
+					} else {
+						tickersToRebalance.delete(ticker);
+					}
+				} else {
+					const existingOrder = order[0];
 
-          if (existingOrder.status === "FILLED") {
-            tickersToRebalance.delete(ticker);
-            continue;
-          }
+					if (existingOrder.status === "FILLED") {
+						tickersToRebalance.delete(ticker);
+						continue;
+					}
 
-          if (existingOrder.status === "CANCELLED") {
-            continue;
-          }
+					if (existingOrder.status === "CANCELLED") {
+						continue;
+					}
 
-          const orderbook = await getOrderbook(ticker);
-          const bestPrice =
-            existingOrder.side === "BUY"
-              ? orderbook.bid[0].price
-              : orderbook.ask[0].price;
+					const orderbook = await getOrderbook(ticker);
+					const bestPrice =
+						existingOrder.side === "BUY"
+							? orderbook.bid[0].price
+							: orderbook.ask[0].price;
 
-          if (existingOrder.price && !existingOrder.price.eq(bestPrice)) {
-            try {
-              await cancelOrder(existingOrder.id.toString());
-            } catch (error) {
-              console.error(`Cancel failed for ${existingOrder.id}:`, error);
-              continue;
-            }
+					if (existingOrder.price && !existingOrder.price.eq(bestPrice)) {
+						try {
+							await cancelOrder(existingOrder.id.toString());
+						} catch (error) {
+							console.error(`Cancel failed for ${existingOrder.id}:`, error);
+							continue;
+						}
 
-            const updatedPositions = await getPositions({ markets: [ticker] });
-            const currentPosition = updatedPositions[0];
+						const updatedPositions = await getPositions({ markets: [ticker] });
+						const currentPosition = updatedPositions[0];
 
-            const { size, side } = calculateOrderSize(
-              desiredPosition,
-              currentPosition
-                ? currentPosition.size.times(
-                    currentPosition.side === "LONG" ? 1 : -1,
-                  )
-                : BigNumber(0),
-            );
+						const { size, side } = calculateOrderSize(
+							desiredPosition,
+							currentPosition
+								? currentPosition.size.times(
+										currentPosition.side === "LONG" ? 1 : -1,
+									)
+								: BigNumber(0),
+						);
 
-            if (size.gt(0)) {
-              await createLimitOrder({
-                ticker,
-                size,
-                side,
-              });
-            } else {
-              tickersToRebalance.delete(ticker);
-            }
-          }
-        }
+						if (size.gt(0)) {
+							await createLimitOrder({
+								ticker,
+								size,
+								side,
+							});
+						} else {
+							tickersToRebalance.delete(ticker);
+						}
+					}
+				}
 
-        await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
-      }
-    }
+				await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
+			}
+		}
 
-    await massCancel();
-    const postTradePositions = await getPositions();
+		await massCancel();
+		const postTradePositions = await getPositions();
 
-    const tickersToMarketOrder = filterTickersToRebalance(
-      desiredPositions,
-      postTradePositions,
-    );
+		const tickersToMarketOrder = filterTickersToRebalance(
+			desiredPositions,
+			postTradePositions,
+		);
 
-    const tickersMarketOrdered: string[] = [];
+		const tickersMarketOrdered: string[] = [];
 
-    for (const [ticker, desiredPosition] of tickersToMarketOrder) {
-      const currentPosition = postTradePositions.find(
-        (p) => p.market === ticker,
-      );
-      const { size, side } = calculateOrderSize(
-        desiredPosition,
-        currentPosition
-          ? currentPosition.size.times(currentPosition.side === "LONG" ? 1 : -1)
-          : BigNumber(0),
-      );
+		for (const [ticker, desiredPosition] of tickersToMarketOrder) {
+			const currentPosition = postTradePositions.find(
+				(p) => p.market === ticker,
+			);
+			const { size, side } = calculateOrderSize(
+				desiredPosition,
+				currentPosition
+					? currentPosition.size.times(currentPosition.side === "LONG" ? 1 : -1)
+					: BigNumber(0),
+			);
 
-      if (size.gt(0)) {
-        if (desiredPosition.isRfq) {
-          await createRFQMarketOrder({ ticker, size, side });
-        } else {
-          await createMarketOrder({ ticker, size, side });
-        }
-        tickersMarketOrdered.push(desiredPosition.rwTicker);
-      }
-    }
+			if (size.gt(0)) {
+				if (desiredPosition.isRfq) {
+					await createRFQMarketOrder({ ticker, size, side });
+				} else {
+					await createMarketOrder({ ticker, size, side });
+				}
+				tickersMarketOrdered.push(desiredPosition.rwTicker);
+			}
+		}
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    const finalPositions = await getPositions();
+		await new Promise((resolve) => setTimeout(resolve, 2000));
+		const finalPositions = await getPositions();
 
-    const tickersOutOfBuffer = Array.from(
-      filterTickersToRebalance(desiredPositions, finalPositions).values(),
-    ).map((fr) => {
-      const position = finalPositions.find(
-        (fp) => fp.market === fr.extendedTicker,
-      );
-      const size = BigNumber(
-        position
-          ? position.side === "LONG"
-            ? position.size
-            : position.size.times(-1)
-          : 0,
-      );
+		const tickersOutOfBuffer = Array.from(
+			filterTickersToRebalance(desiredPositions, finalPositions).values(),
+		).map((fr) => {
+			const position = finalPositions.find(
+				(fp) => fp.market === fr.extendedTicker,
+			);
+			const size = BigNumber(
+				position
+					? position.side === "LONG"
+						? position.size
+						: position.size.times(-1)
+					: 0,
+			);
 
-      const marketStats = markets.find(
-        (m) => m.name === fr.extendedTicker,
-      )?.marketStats;
-      const midPrice = marketStats
-        ? marketStats.askPrice.plus(marketStats.bidPrice).div(2)
-        : BigNumber(0);
+			const marketStats = markets.find(
+				(m) => m.name === fr.extendedTicker,
+			)?.marketStats;
+			const midPrice = marketStats
+				? marketStats.askPrice.plus(marketStats.bidPrice).div(2)
+				: BigNumber(0);
 
-      const gapToLower = size.minus(fr.lowerBound).abs();
-      const gapToUpper = fr.upperBound.minus(size).abs();
-      const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
+			const gapToLower = size.minus(fr.lowerBound).abs();
+			const gapToUpper = fr.upperBound.minus(size).abs();
+			const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
 
-      const priceGap = gap.times(midPrice).toNumber();
+			const priceGap = gap.times(midPrice).toNumber();
 
-      return { ...fr, size, priceGap };
-    });
+			return { ...fr, size, priceGap };
+		});
 
-    const result: TradeResult = {
-      status:
-        tickersToRebalance.size === 0
-          ? "Maker on all orders"
-          : tickersToMarketOrder.size > tickersMarketOrdered.length
-            ? "Incomplete"
-            : `${tickersMarketOrdered.length} taker orders`,
-      timedOut: Date.now() - startTime >= MAX_RUNTIME_MS,
-      runtimeMs: Date.now() - startTime,
-      marketTickers: tickersMarketOrdered,
-      positions: finalPositions.map((p) => ({
-        market: p.market,
-        side: p.side,
-        size: p.size.toString(),
-        value: p.value.toString(),
-      })),
-    };
+		const result: TradeResult = {
+			status:
+				tickersToRebalance.size === 0
+					? "Maker on all orders"
+					: tickersToMarketOrder.size > tickersMarketOrdered.length
+						? "Incomplete"
+						: `${tickersMarketOrdered.length} taker orders`,
+			timedOut: Date.now() - startTime >= MAX_RUNTIME_MS,
+			runtimeMs: Date.now() - startTime,
+			marketTickers: tickersMarketOrdered,
+			positions: finalPositions.map((p) => ({
+				market: p.market,
+				side: p.side,
+				size: p.size.toString(),
+				value: p.value.toString(),
+			})),
+		};
 
-    const balance = await getBalance();
+		const balance = await getBalance();
 
-    const runtimeSec = Math.floor(result.runtimeMs / 1000);
-    const minutes = Math.floor(runtimeSec / 60);
-    const seconds = runtimeSec % 60;
+		const runtimeSec = Math.floor(result.runtimeMs / 1000);
+		const minutes = Math.floor(runtimeSec / 60);
+		const seconds = runtimeSec % 60;
 
-    const marketedList =
-      result.marketTickers.length > 0
-        ? result.marketTickers.join(", ")
-        : "None";
-    const outOfBoundsList =
-      tickersOutOfBuffer.length > 0
-        ? tickersOutOfBuffer
-            .map((t) => `${t.rwTicker} $${t.priceGap.toFixed(2)}`)
-            .join(", ")
-        : "None";
+		const marketedList =
+			result.marketTickers.length > 0
+				? result.marketTickers.join(", ")
+				: "None";
+		const outOfBoundsList =
+			tickersOutOfBuffer.length > 0
+				? tickersOutOfBuffer
+						.map((t) => `${t.rwTicker} $${t.priceGap.toFixed(2)}`)
+						.join(", ")
+				: "None";
 
-    const message = `
+		const message = `
   Extended Trading Complete
 
   ${result.status}
@@ -248,172 +248,172 @@ export const handler: Handler = async () => {
   Positions Out of Bounds: ${outOfBoundsList}
   Leverage: ${balance.leverage.decimalPlaces(2, BigNumber.ROUND_HALF_UP)}`;
 
-    await sendTelegramMessage(message);
+		await sendTelegramMessage(message);
 
-    return result;
-  } catch (error) {
-    console.error("Lambda error:", error);
-    if (error instanceof Error) {
-      await sendTelegramMessage(`Lambda error: ${error.message}`);
-    }
-    throw error;
-  }
+		return result;
+	} catch (error) {
+		console.error("Lambda error:", error);
+		if (error instanceof Error) {
+			await sendTelegramMessage(`Lambda error: ${error.message}`);
+		}
+		throw error;
+	}
 };
 
 const calculateDesiredPositions = (
-  volAndWeight: Awaited<ReturnType<typeof getWeightsAndVolatilities>>,
-  tickers: Awaited<ReturnType<typeof getTickers>>,
-  config: Database["public"]["Tables"]["exchange"]["Row"],
-  markets: Market[],
+	volAndWeight: Awaited<ReturnType<typeof getWeightsAndVolatilities>>,
+	tickers: Awaited<ReturnType<typeof getTickers>>,
+	config: Database["public"]["Tables"]["exchange"]["Row"],
+	markets: Market[],
 ) => {
-  const tickerMap = new Map(
-    tickers
-      .filter((t) => markets.some((m) => m.name === t.extended_ticker))
-      .map((t) => [t.rbw_ticker, t.extended_ticker]),
-  );
+	const tickerMap = new Map(
+		tickers
+			.filter((t) => markets.some((m) => m.name === t.extended_ticker))
+			.map((t) => [t.rbw_ticker, t.extended_ticker]),
+	);
 
-  return volAndWeight.map((vw) => {
-    const extendedTicker = tickerMap.get(vw.ticker);
-    if (!extendedTicker) throw new Error(`No extended ticker for ${vw.ticker}`);
+	return volAndWeight.map((vw) => {
+		const extendedTicker = tickerMap.get(vw.ticker);
+		if (!extendedTicker) throw new Error(`No extended ticker for ${vw.ticker}`);
 
-    const tokenAllocation = vw.token_allocation;
+		const tokenAllocation = vw.token_allocation;
 
-    const isPositive = tokenAllocation.gte(0);
+		const isPositive = tokenAllocation.gte(0);
 
-    const market = markets.find((m) => m.name === extendedTicker);
+		const market = markets.find((m) => m.name === extendedTicker);
 
-    return {
-      rwTicker: vw.ticker,
-      extendedTicker,
-      desiredSize: tokenAllocation,
-      upperBound: tokenAllocation.times(
-        Decimal(isPositive ? config.trade_buffer : -config.trade_buffer).plus(
-          1,
-        ),
-      ),
-      lowerBound: tokenAllocation.times(
-        Decimal(isPositive ? -config.trade_buffer : config.trade_buffer).plus(
-          1,
-        ),
-      ),
-      minOrdersize: market ? market.tradingConfig.minOrderSize : BigNumber(0),
-      minOrdersizeChange: market
-        ? market.tradingConfig.minOrderSizeChange
-        : BigNumber(0),
-      isRfq: market?.isRfq ?? false,
-    };
-  });
+		return {
+			rwTicker: vw.ticker,
+			extendedTicker,
+			desiredSize: tokenAllocation,
+			upperBound: tokenAllocation.times(
+				Decimal(isPositive ? config.trade_buffer : -config.trade_buffer).plus(
+					1,
+				),
+			),
+			lowerBound: tokenAllocation.times(
+				Decimal(isPositive ? -config.trade_buffer : config.trade_buffer).plus(
+					1,
+				),
+			),
+			minOrdersize: market ? market.tradingConfig.minOrderSize : BigNumber(0),
+			minOrdersizeChange: market
+				? market.tradingConfig.minOrderSizeChange
+				: BigNumber(0),
+			isRfq: market?.isRfq ?? false,
+		};
+	});
 };
 
 type TDesiredPosition = ReturnType<typeof calculateDesiredPositions>[number];
 
 const calculateOrderSize = (
-  desiredPosition: TDesiredPosition,
-  currentPosition: BigNumber,
+	desiredPosition: TDesiredPosition,
+	currentPosition: BigNumber,
 ): { size: BigNumber; side: "BUY" | "SELL" } => {
-  if (
-    currentPosition.gte(desiredPosition.lowerBound) &&
-    currentPosition.lte(desiredPosition.upperBound)
-  ) {
-    return { size: BigNumber(0), side: "BUY" };
-  }
+	if (
+		currentPosition.gte(desiredPosition.lowerBound) &&
+		currentPosition.lte(desiredPosition.upperBound)
+	) {
+		return { size: BigNumber(0), side: "BUY" };
+	}
 
-  if (currentPosition.lt(desiredPosition.lowerBound)) {
-    const gap = desiredPosition.lowerBound.minus(currentPosition);
+	if (currentPosition.lt(desiredPosition.lowerBound)) {
+		const gap = desiredPosition.lowerBound.minus(currentPosition);
 
-    const size = gap.lt(desiredPosition.minOrdersize)
-      ? desiredPosition.minOrdersize
-      : gap;
+		const size = gap.lt(desiredPosition.minOrdersize)
+			? desiredPosition.minOrdersize
+			: gap;
 
-    const roundedUp = roundToMinChange(
-      size,
-      desiredPosition.minOrdersizeChange,
-      Decimal.ROUND_UP,
-    );
+		const roundedUp = roundToMinChange(
+			size,
+			desiredPosition.minOrdersizeChange,
+			Decimal.ROUND_UP,
+		);
 
-    const roundedDown = roundToMinChange(
-      size,
-      desiredPosition.minOrdersizeChange,
-      Decimal.ROUND_DOWN,
-    );
+		const roundedDown = roundToMinChange(
+			size,
+			desiredPosition.minOrdersizeChange,
+			Decimal.ROUND_DOWN,
+		);
 
-    if (currentPosition.plus(roundedUp).lt(desiredPosition.upperBound))
-      return { size: roundedUp, side: "BUY" };
+		if (currentPosition.plus(roundedUp).lt(desiredPosition.upperBound))
+			return { size: roundedUp, side: "BUY" };
 
-    if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
-      return { size: roundedDown, side: "BUY" };
+		if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
+			return { size: roundedDown, side: "BUY" };
 
-    return { size: BigNumber(0), side: "BUY" };
-  }
+		return { size: BigNumber(0), side: "BUY" };
+	}
 
-  if (currentPosition.gt(desiredPosition.upperBound)) {
-    const gap = desiredPosition.upperBound
-      .minus(currentPosition)
-      .absoluteValue();
+	if (currentPosition.gt(desiredPosition.upperBound)) {
+		const gap = desiredPosition.upperBound
+			.minus(currentPosition)
+			.absoluteValue();
 
-    const size = gap.lt(desiredPosition.minOrdersize)
-      ? desiredPosition.minOrdersize
-      : gap;
+		const size = gap.lt(desiredPosition.minOrdersize)
+			? desiredPosition.minOrdersize
+			: gap;
 
-    const roundedUp = roundToMinChange(
-      size,
-      desiredPosition.minOrdersizeChange,
-      Decimal.ROUND_UP,
-    );
+		const roundedUp = roundToMinChange(
+			size,
+			desiredPosition.minOrdersizeChange,
+			Decimal.ROUND_UP,
+		);
 
-    const roundedDown = roundToMinChange(
-      size,
-      desiredPosition.minOrdersizeChange,
-      Decimal.ROUND_DOWN,
-    );
+		const roundedDown = roundToMinChange(
+			size,
+			desiredPosition.minOrdersizeChange,
+			Decimal.ROUND_DOWN,
+		);
 
-    if (currentPosition.plus(roundedUp).gt(desiredPosition.lowerBound))
-      return { size: roundedUp, side: "SELL" };
+		if (currentPosition.plus(roundedUp).gt(desiredPosition.lowerBound))
+			return { size: roundedUp, side: "SELL" };
 
-    if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
-      return { size: roundedDown, side: "SELL" };
+		if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
+			return { size: roundedDown, side: "SELL" };
 
-    return { size: BigNumber(0), side: "SELL" };
-  }
+		return { size: BigNumber(0), side: "SELL" };
+	}
 
-  return { size: BigNumber(0), side: "BUY" };
+	return { size: BigNumber(0), side: "BUY" };
 };
 
 const filterTickersToRebalance = (
-  desiredPositions: TDesiredPosition[],
-  currentPositions: Position[],
+	desiredPositions: TDesiredPosition[],
+	currentPositions: Position[],
 ) => {
-  const positionMap = new Map(
-    currentPositions.map((p) => [
-      p.market,
-      p.side === "LONG" ? p.size : p.size.multipliedBy(-1),
-    ]),
-  );
+	const positionMap = new Map(
+		currentPositions.map((p) => [
+			p.market,
+			p.side === "LONG" ? p.size : p.size.multipliedBy(-1),
+		]),
+	);
 
-  const result = new Map<string, TDesiredPosition>();
+	const result = new Map<string, TDesiredPosition>();
 
-  for (const dp of desiredPositions) {
-    const currentSize = positionMap.get(dp.extendedTicker);
+	for (const dp of desiredPositions) {
+		const currentSize = positionMap.get(dp.extendedTicker);
 
-    if (currentSize === undefined) {
-      result.set(dp.extendedTicker, dp);
-      continue;
-    }
+		if (currentSize === undefined) {
+			result.set(dp.extendedTicker, dp);
+			continue;
+		}
 
-    if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
-      continue;
-    }
+		if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
+			continue;
+		}
 
-    result.set(dp.extendedTicker, dp);
-  }
+		result.set(dp.extendedTicker, dp);
+	}
 
-  return result;
+	return result;
 };
 
 type TradeResult = {
-  status: string;
-  timedOut: boolean;
-  runtimeMs: number;
-  marketTickers: string[];
-  positions: { market: string; side: string; size: string; value: string }[];
+	status: string;
+	timedOut: boolean;
+	runtimeMs: number;
+	marketTickers: string[];
+	positions: { market: string; side: string; size: string; value: string }[];
 };
