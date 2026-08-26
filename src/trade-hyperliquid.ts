@@ -1,11 +1,11 @@
 import {
-  type AllMidsResponse,
-  ApiRequestError,
-  type ClearinghouseStateResponse,
-  ExchangeClient,
-  HttpTransport,
-  InfoClient,
-  type MetaResponse,
+	type AllMidsResponse,
+	ApiRequestError,
+	type ClearinghouseStateResponse,
+	ExchangeClient,
+	HttpTransport,
+	InfoClient,
+	type MetaResponse,
 } from "@nktkas/hyperliquid";
 import { formatPrice, SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type { Handler } from "aws-lambda";
@@ -24,219 +24,216 @@ const MAX_RUNTIME_MS = 10 * 60 * 1000;
 const MINIMUM_ORDER_VALUE = BN(10);
 
 export const handler: Handler = async () => {
-  const startTime = Date.now();
-  sendTelegramMessage("Hyperliquid Lambda Started").catch(console.error);
+	const startTime = Date.now();
+	sendTelegramMessage("Hyperliquid Lambda Started").catch(console.error);
 
-  const WALLET = Resource.HYPERLIQUID_WALLET.value as Hex;
-  const transport = new HttpTransport();
-  const client = new InfoClient({ transport });
-  const wallet = privateKeyToAccount(Resource.HYPERLIQUID_KEY.value as Hex);
-  const converter = await SymbolConverter.create({ transport });
-  const exchange = new ExchangeClient({ transport, wallet });
+	const WALLET = Resource.HYPERLIQUID_WALLET.value as Hex;
+	const transport = new HttpTransport();
+	const client = new InfoClient({ transport });
+	const wallet = privateKeyToAccount(Resource.HYPERLIQUID_KEY.value as Hex);
+	const converter = await SymbolConverter.create({ transport });
+	const exchange = new ExchangeClient({ transport, wallet });
 
-  const config = await getConfig("hyperliquid");
-  const volAndWeight = await getWeightsAndVolatilities(config);
-  const tickers = await getTickers();
-  const { assetPositions } = await client.clearinghouseState({
-    user: WALLET,
-  });
-  const meta = await client.meta();
+	const config = await getConfig("hyperliquid");
+	const volAndWeight = await getWeightsAndVolatilities(config);
+	const tickers = await getTickers();
+	const { assetPositions } = await client.clearinghouseState({
+		user: WALLET,
+	});
+	const meta = await client.meta();
 
-  const desiredPositions = calculateDesiredPositions(
-    volAndWeight,
-    tickers,
-    config,
-    meta.universe,
-  );
+	const desiredPositions = calculateDesiredPositions(
+		volAndWeight,
+		tickers,
+		config,
+		meta.universe,
+	);
 
-  const tickersToRebalance = filterTickersToRebalance(
-    desiredPositions,
-    assetPositions,
-  );
+	const tickersToRebalance = filterTickersToRebalance(
+		desiredPositions,
+		assetPositions,
+	);
 
-  while (
-    Date.now() - startTime < MAX_RUNTIME_MS &&
-    tickersToRebalance.size > 0
-  ) {
-    await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
-    const allMids = await client.allMids();
-    const orders = await getOpenOrders(client);
-    const { assetPositions: updatedPositions } =
-      await client.clearinghouseState({ user: WALLET });
-    for (const [ticker, desiredPosition] of tickersToRebalance) {
-      const order = orders.find((o) => o.coin === ticker);
+	while (
+		Date.now() - startTime < MAX_RUNTIME_MS &&
+		tickersToRebalance.size > 0
+	) {
+		await new Promise((resolve) => setTimeout(resolve, SLEEP_MS));
+		const allMids = await client.allMids();
+		const orders = await getOpenOrders(client);
+		const { assetPositions: updatedPositions } =
+			await client.clearinghouseState({ user: WALLET });
+		for (const [ticker, desiredPosition] of tickersToRebalance) {
+			const order = orders.find((o) => o.coin === ticker);
 
-      if (!order) {
-        const currentPosition = updatedPositions.find(
-          (p) => p.position.coin === ticker,
-        );
-        const { size, side } = calculateOrderSize(
-          desiredPosition,
-          BN(currentPosition ? currentPosition.position.szi : 0),
-          allMids,
-        );
+			if (!order) {
+				const currentPosition = updatedPositions.find(
+					(p) => p.position.coin === ticker,
+				);
+				const { size, side } = calculateOrderSize(
+					desiredPosition,
+					BN(currentPosition ? currentPosition.position.szi : 0),
+					allMids,
+				);
 
-        if (size.gt(0)) {
-          await createLimitOrder({
-            ticker,
-            size,
-            side,
-            converter,
-            client,
-            exchange,
-          });
-        } else {
-          tickersToRebalance.delete(ticker);
-        }
-      } else {
-        const book = await client.l2Book({ coin: ticker });
-        const bestPrice = book?.levels[order.side === "B" ? 0 : 1]?.[0].px;
+				if (size.gt(0)) {
+					await createLimitOrder({
+						ticker,
+						size,
+						side,
+						converter,
+						client,
+						exchange,
+					});
+				} else {
+					tickersToRebalance.delete(ticker);
+				}
+			} else {
+				const book = await client.l2Book({ coin: ticker });
+				const bestPrice = book?.levels[order.side === "B" ? 0 : 1]?.[0].px;
 
-        if (bestPrice && BN(order.limitPx).eq(bestPrice)) continue;
+				if (bestPrice && BN(order.limitPx).eq(bestPrice)) continue;
 
-        try {
-          await exchange.cancel({
-            cancels: [
-              { a: converter.getAssetId(order.coin) || "", o: order.oid },
-            ],
-          });
-        } catch (error) {
-          if (error instanceof ApiRequestError) {
-            continue;
-          } else {
-            console.error(
-              `Cancel failed for ${order.coin} ${order.oid}:`,
-              error,
-            );
-          }
-        }
+				try {
+					await exchange.cancel({
+						cancels: [
+							{ a: converter.getAssetId(order.coin) || "", o: order.oid },
+						],
+					});
+				} catch (error) {
+					if (error instanceof ApiRequestError) {
+						continue;
+					} else {
+						console.log(`Cancel failed for ${order.coin} ${order.oid}:`, error);
+					}
+				}
 
-        const currentPosition = updatedPositions.find(
-          (p) => p.position.coin === ticker,
-        );
+				const currentPosition = updatedPositions.find(
+					(p) => p.position.coin === ticker,
+				);
 
-        const { size, side } = calculateOrderSize(
-          desiredPosition,
-          currentPosition ? BN(currentPosition.position.szi) : BN(0),
-          allMids,
-        );
+				const { size, side } = calculateOrderSize(
+					desiredPosition,
+					currentPosition ? BN(currentPosition.position.szi) : BN(0),
+					allMids,
+				);
 
-        if (size.gt(0)) {
-          await createLimitOrder({
-            ticker,
-            size,
-            side,
-            converter,
-            client,
-            exchange,
-          });
-        } else {
-          tickersToRebalance.delete(ticker);
-        }
-      }
-    }
-  }
+				if (size.gt(0)) {
+					await createLimitOrder({
+						ticker,
+						size,
+						side,
+						converter,
+						client,
+						exchange,
+					});
+				} else {
+					tickersToRebalance.delete(ticker);
+				}
+			}
+		}
+	}
 
-  const openOrders = await client.openOrders({ user: WALLET });
-  await exchange.cancel({
-    cancels: openOrders.map((o) => ({
-      a: converter.getAssetId(o.coin) || "",
-      o: o.oid,
-    })),
-  });
-  const { assetPositions: postTradePositions } =
-    await client.clearinghouseState({ user: WALLET });
+	const openOrders = await client.openOrders({ user: WALLET });
+	await exchange.cancel({
+		cancels: openOrders.map((o) => ({
+			a: converter.getAssetId(o.coin) || "",
+			o: o.oid,
+		})),
+	});
+	const { assetPositions: postTradePositions } =
+		await client.clearinghouseState({ user: WALLET });
 
-  const tickersToMarketOrder = filterTickersToRebalance(
-    desiredPositions,
-    postTradePositions,
-  );
+	const tickersToMarketOrder = filterTickersToRebalance(
+		desiredPositions,
+		postTradePositions,
+	);
 
-  const tickersMarketOrdered: string[] = [];
+	const tickersMarketOrdered: string[] = [];
 
-  for (const [ticker, desiredPosition] of tickersToMarketOrder) {
-    const allMids = await client.allMids();
-    const currentPosition = postTradePositions.find(
-      (p) => p.position.coin === ticker,
-    );
-    const { size, side } = calculateOrderSize(
-      desiredPosition,
-      BN(currentPosition ? currentPosition.position.szi : 0),
-      allMids,
-    );
+	for (const [ticker, desiredPosition] of tickersToMarketOrder) {
+		const allMids = await client.allMids();
+		const currentPosition = postTradePositions.find(
+			(p) => p.position.coin === ticker,
+		);
+		const { size, side } = calculateOrderSize(
+			desiredPosition,
+			BN(currentPosition ? currentPosition.position.szi : 0),
+			allMids,
+		);
 
-    if (size.gt(0)) {
-      const mid = allMids[ticker];
-      const price =
-        parseFloat(mid) * (1 + (side === "BUY" ? SLIPPAGE : -SLIPPAGE));
-      await exchange.order({
-        orders: [
-          {
-            a: converter.getAssetId(ticker) || "",
-            b: side === "BUY",
-            p: formatPrice(price, converter.getSzDecimals(ticker) || 0),
-            s: size.toNumber(),
-            r: false,
-            t: { limit: { tif: "Gtc" } },
-          },
-        ],
-      });
-      tickersMarketOrdered.push(desiredPosition.rwTicker);
-    }
-  }
+		if (size.gt(0)) {
+			const mid = allMids[ticker];
+			const price =
+				parseFloat(mid) * (1 + (side === "BUY" ? SLIPPAGE : -SLIPPAGE));
+			await exchange.order({
+				orders: [
+					{
+						a: converter.getAssetId(ticker) || "",
+						b: side === "BUY",
+						p: formatPrice(price, converter.getSzDecimals(ticker) || 0),
+						s: size.toNumber(),
+						r: false,
+						t: { limit: { tif: "Gtc" } },
+					},
+				],
+			});
+			tickersMarketOrdered.push(desiredPosition.rwTicker);
+		}
+	}
 
-  const { assetPositions: finalPositions, crossMarginSummary } =
-    await client.clearinghouseState({
-      user: WALLET,
-    });
+	const { assetPositions: finalPositions, crossMarginSummary } =
+		await client.clearinghouseState({
+			user: WALLET,
+		});
 
-  const allMids = await client.allMids();
+	const allMids = await client.allMids();
 
-  const tickersOutOfBuffer = Array.from(
-    filterTickersToRebalance(desiredPositions, finalPositions).values(),
-  ).map((fr) => {
-    const position = finalPositions.find(
-      (fp) => fp.position.coin === fr.exchangeTicker,
-    )?.position;
+	const tickersOutOfBuffer = Array.from(
+		filterTickersToRebalance(desiredPositions, finalPositions).values(),
+	).map((fr) => {
+		const position = finalPositions.find(
+			(fp) => fp.position.coin === fr.exchangeTicker,
+		)?.position;
 
-    const size = BN(position?.szi || 0);
-    const midPrice = allMids[fr.exchangeTicker];
+		const size = BN(position?.szi || 0);
+		const midPrice = allMids[fr.exchangeTicker];
 
-    const gapToLower = size.minus(fr.lowerBound).abs();
-    const gapToUpper = fr.upperBound.minus(size).abs();
-    const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
-    const priceGap = gap.times(midPrice).toNumber();
+		const gapToLower = size.minus(fr.lowerBound).abs();
+		const gapToUpper = fr.upperBound.minus(size).abs();
+		const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
+		const priceGap = gap.times(midPrice).toNumber();
 
-    return { ...fr, size, priceGap };
-  });
+		return { ...fr, size, priceGap };
+	});
 
-  const runtimeMs = Date.now() - startTime;
-  const minutes = Math.floor(runtimeMs / 60000);
-  const seconds = Math.floor((runtimeMs % 60000) / 1000);
+	const runtimeMs = Date.now() - startTime;
+	const minutes = Math.floor(runtimeMs / 60000);
+	const seconds = Math.floor((runtimeMs % 60000) / 1000);
 
-  const status =
-    tickersToRebalance.size === 0
-      ? "Maker on all orders"
-      : tickersToMarketOrder.size > tickersMarketOrdered.length
-        ? "Incomplete"
-        : `${tickersMarketOrdered.length} taker orders`;
-  const marketedList =
-    tickersMarketOrdered.length > 0 ? tickersMarketOrdered.join(", ") : "None";
-  const outOfBoundsList =
-    tickersOutOfBuffer.length > 0
-      ? tickersOutOfBuffer
-          .map((t) => `${t.rwTicker} $${t.priceGap.toFixed(2)}`)
-          .join(", ")
-      : "None";
+	const status =
+		tickersToRebalance.size === 0
+			? "Maker on all orders"
+			: tickersToMarketOrder.size > tickersMarketOrdered.length
+				? "Incomplete"
+				: `${tickersMarketOrdered.length} taker orders`;
+	const marketedList =
+		tickersMarketOrdered.length > 0 ? tickersMarketOrdered.join(", ") : "None";
+	const outOfBoundsList =
+		tickersOutOfBuffer.length > 0
+			? tickersOutOfBuffer
+					.map((t) => `${t.rwTicker} $${t.priceGap.toFixed(2)}`)
+					.join(", ")
+			: "None";
 
-  const { balances } = await client.spotClearinghouseState({ user: WALLET });
-  const usdcTotal = balances.find((b) => b.coin === "USDC")?.total || 1;
+	const { balances } = await client.spotClearinghouseState({ user: WALLET });
+	const usdcTotal = balances.find((b) => b.coin === "USDC")?.total || 1;
 
-  const leverage = BN(crossMarginSummary.totalNtlPos)
-    .dividedBy(usdcTotal)
-    .decimalPlaces(2, BN.ROUND_HALF_UP);
+	const leverage = BN(crossMarginSummary.totalNtlPos)
+		.dividedBy(usdcTotal)
+		.decimalPlaces(2, BN.ROUND_HALF_UP);
 
-  const message = `
+	const message = `
   Hyperliquid Trading Complete
 
   ${status}
@@ -245,155 +242,155 @@ export const handler: Handler = async () => {
   Positions Out of Bounds: ${outOfBoundsList}
   Leverage: ${leverage}`;
 
-  await sendTelegramMessage(message);
+	await sendTelegramMessage(message);
 
-  return { finalPositions, tickersOutOfBuffer };
+	return { finalPositions, tickersOutOfBuffer };
 };
 
 const calculateDesiredPositions = (
-  volAndWeight: Awaited<ReturnType<typeof getWeightsAndVolatilities>>,
-  tickers: Awaited<ReturnType<typeof getTickers>>,
-  config: Database["public"]["Tables"]["exchange"]["Row"],
-  markets: MetaResponse["universe"],
+	volAndWeight: Awaited<ReturnType<typeof getWeightsAndVolatilities>>,
+	tickers: Awaited<ReturnType<typeof getTickers>>,
+	config: Database["public"]["Tables"]["exchange"]["Row"],
+	markets: MetaResponse["universe"],
 ) => {
-  const tickerMap = new Map(
-    tickers
-      .filter((t) => markets.some((m) => m.name === t.hyperliquid_ticker))
-      .map((t) => [t.rbw_ticker, t.hyperliquid_ticker]),
-  );
+	const tickerMap = new Map(
+		tickers
+			.filter((t) => markets.some((m) => m.name === t.hyperliquid_ticker))
+			.map((t) => [t.rbw_ticker, t.hyperliquid_ticker]),
+	);
 
-  return volAndWeight.map((vw) => {
-    const exchangeTicker = tickerMap.get(vw.ticker);
-    if (!exchangeTicker)
-      throw new Error(`No hyperliquid ticker for ${vw.ticker}`);
+	return volAndWeight.map((vw) => {
+		const exchangeTicker = tickerMap.get(vw.ticker);
+		if (!exchangeTicker)
+			throw new Error(`No hyperliquid ticker for ${vw.ticker}`);
 
-    const tokenAllocation = vw.token_allocation;
+		const tokenAllocation = vw.token_allocation;
 
-    const isPositive = tokenAllocation.gte(0);
+		const isPositive = tokenAllocation.gte(0);
 
-    const market = markets.find((m) => m.name === exchangeTicker);
+		const market = markets.find((m) => m.name === exchangeTicker);
 
-    return {
-      rwTicker: vw.ticker,
-      exchangeTicker,
-      desiredSize: tokenAllocation,
-      upperBound: tokenAllocation.times(
-        BN(isPositive ? config.trade_buffer : -config.trade_buffer).plus(1),
-      ),
-      lowerBound: tokenAllocation.times(
-        BN(isPositive ? -config.trade_buffer : config.trade_buffer).plus(1),
-      ),
-      minOrderSizeChange: market
-        ? getMinOrderSizeChange(market.szDecimals)
-        : BN(0),
-      szDecimals: market ? market.szDecimals : 1,
-    };
-  });
+		return {
+			rwTicker: vw.ticker,
+			exchangeTicker,
+			desiredSize: tokenAllocation,
+			upperBound: tokenAllocation.times(
+				BN(isPositive ? config.trade_buffer : -config.trade_buffer).plus(1),
+			),
+			lowerBound: tokenAllocation.times(
+				BN(isPositive ? -config.trade_buffer : config.trade_buffer).plus(1),
+			),
+			minOrderSizeChange: market
+				? getMinOrderSizeChange(market.szDecimals)
+				: BN(0),
+			szDecimals: market ? market.szDecimals : 1,
+		};
+	});
 };
 
 type TDesiredPosition = ReturnType<typeof calculateDesiredPositions>[number];
 
 const filterTickersToRebalance = (
-  desiredPositions: TDesiredPosition[],
-  currentPositions: ClearinghouseStateResponse["assetPositions"],
+	desiredPositions: TDesiredPosition[],
+	currentPositions: ClearinghouseStateResponse["assetPositions"],
 ) => {
-  const positionMap = new Map(
-    currentPositions.map((p) => [p.position.coin, BN(p.position.szi)]),
-  );
+	const positionMap = new Map(
+		currentPositions.map((p) => [p.position.coin, BN(p.position.szi)]),
+	);
 
-  const result = new Map<string, TDesiredPosition>();
+	const result = new Map<string, TDesiredPosition>();
 
-  for (const dp of desiredPositions) {
-    const currentSize = positionMap.get(dp.exchangeTicker);
+	for (const dp of desiredPositions) {
+		const currentSize = positionMap.get(dp.exchangeTicker);
 
-    if (currentSize === undefined) {
-      result.set(dp.exchangeTicker, dp);
-      continue;
-    }
+		if (currentSize === undefined) {
+			result.set(dp.exchangeTicker, dp);
+			continue;
+		}
 
-    if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
-      continue;
-    }
+		if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
+			continue;
+		}
 
-    result.set(dp.exchangeTicker, dp);
-  }
-  return result;
+		result.set(dp.exchangeTicker, dp);
+	}
+	return result;
 };
 
 function calculateOrderSize(
-  desiredPosition: TDesiredPosition,
-  currentPosition: BN,
-  allMids: AllMidsResponse,
+	desiredPosition: TDesiredPosition,
+	currentPosition: BN,
+	allMids: AllMidsResponse,
 ): { size: BN; side: "BUY" | "SELL" } {
-  const { szDecimals, lowerBound, upperBound } = desiredPosition;
-  const midPrice = allMids[desiredPosition.exchangeTicker];
-  const minOrdersize = MINIMUM_ORDER_VALUE.div(midPrice).decimalPlaces(
-    szDecimals,
-    BN.ROUND_UP,
-  );
+	const { szDecimals, lowerBound, upperBound } = desiredPosition;
+	const midPrice = allMids[desiredPosition.exchangeTicker];
+	const minOrdersize = MINIMUM_ORDER_VALUE.div(midPrice).decimalPlaces(
+		szDecimals,
+		BN.ROUND_UP,
+	);
 
-  if (currentPosition.gte(lowerBound) && currentPosition.lte(upperBound)) {
-    return { size: BN(0), side: "BUY" };
-  }
-  if (currentPosition.lt(lowerBound)) {
-    const gap = lowerBound.minus(currentPosition);
+	if (currentPosition.gte(lowerBound) && currentPosition.lte(upperBound)) {
+		return { size: BN(0), side: "BUY" };
+	}
+	if (currentPosition.lt(lowerBound)) {
+		const gap = lowerBound.minus(currentPosition);
 
-    const size = gap.lt(minOrdersize) ? minOrdersize : gap;
+		const size = gap.lt(minOrdersize) ? minOrdersize : gap;
 
-    const roundedUp = roundToDecimal(size, szDecimals, BN.ROUND_UP);
-    const roundedDown = roundToDecimal(size, szDecimals, BN.ROUND_DOWN);
+		const roundedUp = roundToDecimal(size, szDecimals, BN.ROUND_UP);
+		const roundedDown = roundToDecimal(size, szDecimals, BN.ROUND_DOWN);
 
-    if (currentPosition.plus(roundedUp).lt(desiredPosition.upperBound))
-      return { size: roundedUp, side: "BUY" };
+		if (currentPosition.plus(roundedUp).lt(desiredPosition.upperBound))
+			return { size: roundedUp, side: "BUY" };
 
-    if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
-      return { size: roundedDown, side: "BUY" };
+		if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
+			return { size: roundedDown, side: "BUY" };
 
-    return { size: BN(0), side: "BUY" };
-  }
+		return { size: BN(0), side: "BUY" };
+	}
 
-  if (currentPosition.gt(desiredPosition.upperBound)) {
-    const gap = desiredPosition.upperBound
-      .minus(currentPosition)
-      .absoluteValue();
+	if (currentPosition.gt(desiredPosition.upperBound)) {
+		const gap = desiredPosition.upperBound
+			.minus(currentPosition)
+			.absoluteValue();
 
-    const size = gap.lt(minOrdersize) ? minOrdersize : gap;
+		const size = gap.lt(minOrdersize) ? minOrdersize : gap;
 
-    const roundedUp = roundToDecimal(size, szDecimals, BN.ROUND_UP);
-    const roundedDown = roundToDecimal(size, szDecimals, BN.ROUND_DOWN);
+		const roundedUp = roundToDecimal(size, szDecimals, BN.ROUND_UP);
+		const roundedDown = roundToDecimal(size, szDecimals, BN.ROUND_DOWN);
 
-    if (currentPosition.plus(roundedUp).gt(desiredPosition.lowerBound))
-      return { size: roundedUp, side: "SELL" };
+		if (currentPosition.plus(roundedUp).gt(desiredPosition.lowerBound))
+			return { size: roundedUp, side: "SELL" };
 
-    if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
-      return { size: roundedDown, side: "SELL" };
+		if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
+			return { size: roundedDown, side: "SELL" };
 
-    return { size: BN(0), side: "SELL" };
-  }
+		return { size: BN(0), side: "SELL" };
+	}
 
-  return { size: BN(0), side: "BUY" };
+	return { size: BN(0), side: "BUY" };
 }
 
 function getMinOrderSizeChange(szDecimals: number): BN {
-  return new BN(1).dividedBy(new BN(10).pow(szDecimals));
+	return new BN(1).dividedBy(new BN(10).pow(szDecimals));
 }
 
 function roundToDecimal(
-  value: BN,
-  szDecimals: number,
-  roundingMode?: BN.RoundingMode,
+	value: BN,
+	szDecimals: number,
+	roundingMode?: BN.RoundingMode,
 ) {
-  return value.decimalPlaces(szDecimals, roundingMode);
+	return value.decimalPlaces(szDecimals, roundingMode);
 }
 
 async function getOpenOrders(
-  client: InfoClient<{
-    transport: HttpTransport;
-  }>,
+	client: InfoClient<{
+		transport: HttpTransport;
+	}>,
 ) {
-  return await client.openOrders({
-    user: Resource.HYPERLIQUID_WALLET.value,
-  });
+	return await client.openOrders({
+		user: Resource.HYPERLIQUID_WALLET.value,
+	});
 
-  // return orders.find((o) => o.coin === ticker);
+	// return orders.find((o) => o.coin === ticker);
 }
