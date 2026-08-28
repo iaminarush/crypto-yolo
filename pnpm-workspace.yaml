@@ -5,6 +5,7 @@ allowBuilds:
   bufferutil: true
   ccxt: true
   esbuild: true
+  msgpackr-extract: true
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - better-result@3.0.0

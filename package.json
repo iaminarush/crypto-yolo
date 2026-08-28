@@ -10,7 +10,8 @@
 		"genDBTypes": "pnpx supabase gen types typescript --project-id lapkwtulywsjfjogngcx --schema public > database.types.ts",
 		"dev:web": "pnpm --filter web dev",
 		"build:web": "pnpm --filter web build",
-		"start:web": "pnpm --filter web start"
+		"start:web": "pnpm --filter web start",
+		"prepare": "effect-tsgo patch --typescript --no-oxlint"
 	},
 	"keywords": [],
 	"license": "ISC",
@@ -23,7 +24,8 @@
 		"aws-lambda": "^1.0.7",
 		"sst": "^4.2.0",
 		"tsx": "^4.21.0",
-		"typescript": "^5.9.3"
+		"typescript": "7.0.2",
+		"@effect/tsgo": "0.36.5"
 	},
 	"dependencies": {
 		"@aws-sdk/client-lambda": "^3.1000.0",
@@ -34,6 +36,7 @@
 		"better-result": "^3.0.0",
 		"bignumber.js": "^9.3.1",
 		"date-fns": "^4.1.0",
+		"effect": "4.0.0-rc.111",
 		"json-custom-numbers": "^3.1.1",
 		"ky": "^1.14.2",
 		"lodash-es": "^4.17.23",
