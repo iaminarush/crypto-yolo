@@ -4,7 +4,8 @@
     "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "preserve",
-    "moduleResolution": "bundler",
+    // "module": "nodenext",
+    "moduleDetection": "force",
     "allowJs": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -20,6 +21,10 @@
     "paths": {
       "@/*": ["src/*"]
     },
+    "incremental": true,
+    "composite": true,
+    // "verbatimModuleSyntax": true,
+    // "rewriteRelativeImportExtensions": true,
     "plugins": [
       {
         "name": "@effect/language-service",
@@ -50,5 +55,5 @@
       }
     ]
   },
-  "include": ["sst-env.d.ts", "sst.config.ts", "src/**/*"]
+  "include": ["sst-env.d.ts", "sst.config.ts", "src/**/*", "database.types.ts"]
 }
