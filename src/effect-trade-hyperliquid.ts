@@ -9,6 +9,8 @@ import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { getConfig, getTickers, getWeightsAndVolatilities } from "./api";
 
+export const handler: Handler = async () => {};
+
 class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String,
 }) {}
@@ -20,7 +22,16 @@ class TickerMappingError extends Schema.TaggedError<TickerMappingError>()("Ticke
 class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   ticker: Schema.String,
   message: Schema.String,
-  cause: Schema.Defect(),
+  cause: Schema.Unknown,
+}) {}
+
+class HyperliquidError extends Schema.TaggedError<HyperliquidError>()("HyperliquidError", {
+  message: Schema.String,
+  cause: Schema.Unknown,
+}) {}
+
+class TelegramError extends Schema.TaggedError<TelegramError>()("TelegramError", {
+  message: Schema.String,
 }) {}
 
 class HyperliquidService extends Context.Service<
@@ -39,7 +50,14 @@ class HyperliquidService extends Context.Service<
       const wallet = privateKeyToAccount(Resource.HYPERLIQUID_KEY.value as Hex);
       const transport = new HttpTransport();
 
-      const converter = yield* Effect.tryPromise(() => SymbolConverter.create({ transport }));
+      const converter = yield* Effect.tryPromise({
+        try: () => SymbolConverter.create({ transport }),
+        catch: (e) =>
+          new HyperliquidError({
+            message: "Symbol Converter failed",
+            cause: e,
+          }),
+      });
 
       return HyperliquidService.of({
         infoClient: new InfoClient({ transport }),
