@@ -22,6 +22,25 @@ const MINIMUM_ORDER_VALUE = BN(10);
 
 export const handler: Handler = async () => {};
 
+const bootStrap = Effect.gen(function* () {
+  const config = yield* getConfigEff;
+  const volAndWeight = yield* getWeightsAndVolEff(config);
+  const tickers = yield* getTickersEff;
+
+  const { assetPositions } = yield* clearingHouseStateEff;
+  const meta = yield* metaEff;
+
+  const desiredPositions = yield* Effect.try({
+    try: () => calculateDesiredPositions(volAndWeight, tickers, config, meta.universe),
+    catch: (e) =>
+      new TickerMappingError({
+        ticker: e instanceof Error ? e.message : String(e),
+      }),
+  });
+
+  return { config, desiredPositions, meta };
+});
+
 class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String,
   cause: Schema.Unknown,
