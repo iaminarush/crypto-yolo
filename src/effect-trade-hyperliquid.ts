@@ -1,10 +1,15 @@
 import {
   type AllMidsResponse,
+  type CancelSuccessResponse,
   type ClearinghouseStateResponse,
   ExchangeClient,
   HttpTransport,
   InfoClient,
+  type L2BookResponse,
   type MetaResponse,
+  type OpenOrdersResponse,
+  type OrderSuccessResponse,
+  type SpotClearinghouseStateResponse,
 } from "@nktkas/hyperliquid";
 import { SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type { Handler } from "aws-lambda";
@@ -15,140 +20,254 @@ import { Resource } from "sst";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getConfig, getTickers, getWeightsAndVolatilities } from "./api";
-
-const SLEEP_MS = 2250;
-const MAX_RUNTIME_MS = 10 * 60 * 1000;
-const MINIMUM_ORDER_VALUE = BN(10);
-
-export const handler: Handler = async () => {};
-
-const bootStrap = Effect.gen(function* () {
-  const config = yield* getConfigEff;
-  const volAndWeight = yield* getWeightsAndVolEff(config);
-  const tickers = yield* getTickersEff;
-
-  const { assetPositions } = yield* clearingHouseStateEff;
-  const meta = yield* metaEff;
-
-  const desiredPositions = yield* Effect.try({
-    try: () => calculateDesiredPositions(volAndWeight, tickers, config, meta.universe),
-    catch: (e) =>
-      new TickerMappingError({
-        ticker: e instanceof Error ? e.message : String(e),
-      }),
-  });
-
-  return { config, desiredPositions, meta };
-});
+import { createLimitOrder } from "./hyperliquid/create-limit-order";
+import { sendTelegramMessage } from "./util";
 
 class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String,
-  cause: Schema.Unknown,
+  cause: Schema.Defect(),
 }) {}
 
 class TickerMappingError extends Schema.TaggedError<TickerMappingError>()("TickerMappingError", {
   ticker: Schema.String,
+  message: Schema.Defect(),
 }) {}
 
 class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   ticker: Schema.String,
   message: Schema.String,
-  cause: Schema.Unknown,
+  cause: Schema.Defect(),
 }) {}
 
 class HyperliquidError extends Schema.TaggedError<HyperliquidError>()("HyperliquidError", {
   message: Schema.String,
-  cause: Schema.Unknown,
+  cause: Schema.Defect(),
 }) {}
 
 class TelegramError extends Schema.TaggedError<TelegramError>()("TelegramError", {
   message: Schema.String,
+  cause: Schema.Defect(),
 }) {}
+
+const SLEEP_MS = 2250;
+const MAX_RUNTIME_MS = 10 * 60 * 1000;
+const MINIMUM_ORDER_VALUE = BN(10);
+
+export const handler: Handler = () => {};
 
 class HyperliquidService extends Context.Service<
   HyperliquidService,
   {
-    readonly infoClient: InfoClient;
-    readonly exchangeClient: ExchangeClient;
-    readonly converter: SymbolConverter;
     readonly wallet: Hex;
+    readonly converter: SymbolConverter;
+
+    readonly clearinghouseState: Effect.Effect<ClearinghouseStateResponse, HyperliquidError>;
+    readonly spotClearinghouseState: Effect.Effect<
+      SpotClearinghouseStateResponse,
+      HyperliquidError
+    >;
+    readonly meta: Effect.Effect<MetaResponse, HyperliquidError>;
+    readonly allMids: Effect.Effect<AllMidsResponse, HyperliquidError>;
+    l2Book(coin: string): Effect.Effect<L2BookResponse, HyperliquidError>;
+    readonly openOrders: Effect.Effect<OpenOrdersResponse, HyperliquidError>;
+
+    // placeLimitOrder(args: {
+    //   ticker: string;
+    //   size: BN;
+    //   side: "BUY" | "SELL";
+    // }): Effect.Effect<OrderSuccessResponse, OrderError>;
+    // placeMarketOrder(args: {
+    //   ticker: string;
+    //   size: BN;
+    //   side: "BUY" | "SELL";
+    // }): Effect.Effect<OrderSuccessResponse, OrderError>;
+    // cancelOrders(
+    //   cancels: { ticker: string; oid: number }[],
+    // ): Effect.Effect<CancelSuccessResponse, OrderError>;
   }
->()("HyperliquidService") {
+>()("extended-yolo/HyperliquidService") {
   static readonly layer = Layer.effect(
     HyperliquidService,
     Effect.gen(function* () {
       const WALLET = Resource.HYPERLIQUID_WALLET.value as Hex;
+      const transport = new HttpTransport();
+      const client = new InfoClient({ transport });
       const wallet = yield* Effect.try({
         try: () => privateKeyToAccount(Resource.HYPERLIQUID_KEY.value as Hex),
-        catch: (e) =>
+        catch: (cause) =>
           new HyperliquidError({
-            message: "Wallet initialization failed",
-            cause: e,
+            message: "Walllet initialization failed",
+            cause,
           }),
       });
-      const transport = new HttpTransport();
-
       const converter = yield* Effect.tryPromise({
         try: () => SymbolConverter.create({ transport }),
-        catch: (e) =>
+        catch: (cause) =>
           new HyperliquidError({
-            message: "Symbol Converter failed",
-            cause: e,
+            message: "SymbolConverter initialization failed",
+            cause,
           }),
       });
 
+      const exchange = new ExchangeClient({ transport, wallet });
+
+      const clearinghouseState = Effect.fn("HyperliquidService.clearinghouseState")(function* () {
+        return yield* Effect.tryPromise({
+          try: () => client.clearinghouseState({ user: WALLET }),
+          catch: (cause) =>
+            new HyperliquidError({
+              message: "Retreiving Perp Positions Failed",
+              cause,
+            }),
+        });
+      })();
+
+      const spotClearinghouseState = Effect.fn("HyperliquidService.spotClearinghouseState")(
+        function* () {
+          return yield* Effect.tryPromise({
+            try: () => client.spotClearinghouseState({ user: WALLET }),
+            catch: (cause) =>
+              new HyperliquidError({
+                message: "Retreiving Spot Positions Failed",
+                cause,
+              }),
+          });
+        },
+      )();
+
+      const meta = Effect.fn("HyperliquidService.meta")(function* () {
+        return yield* Effect.tryPromise({
+          try: () => client.meta(),
+          catch: (cause) => new HyperliquidError({ message: "Retreiving Meta Failed", cause }),
+        });
+      })();
+
+      const allMids = Effect.fn("HyperliquidService.allMids")(function* () {
+        return yield* Effect.tryPromise({
+          try: () => client.allMids(),
+          catch: (cause) =>
+            new HyperliquidError({
+              message: "Retreiving All Mids Failed",
+              cause,
+            }),
+        });
+      })();
+
+      const l2Book = Effect.fn("HyperliquidService.l2Book")(function* (coin: string) {
+        return yield* Effect.tryPromise({
+          try: () => client.l2Book({ coin }),
+          catch: (cause) =>
+            new HyperliquidError({
+              message: "Retreiving l2Book failed",
+              cause,
+            }),
+        });
+      });
+
+      const openOrders = Effect.fn("HyperliquidService.openOrders")(function* () {
+        return yield* Effect.tryPromise({
+          try: () => client.openOrders({ user: WALLET }),
+          catch: (cause) =>
+            new HyperliquidError({
+              message: "Retreiving Open Orders failed",
+              cause,
+            }),
+        });
+      })();
+
       return HyperliquidService.of({
-        infoClient: new InfoClient({ transport }),
-        exchangeClient: new ExchangeClient({ transport, wallet }),
-        converter,
         wallet: WALLET,
+        converter,
+        clearinghouseState,
+        spotClearinghouseState,
+        meta,
+        allMids,
+        l2Book,
+        openOrders,
       });
     }),
   );
 }
 
-type Config = Effect.Success<typeof getConfigEff>;
-type Tickers = Effect.Success<typeof getTickersEff>;
-type WeightsAndVols = Effect.Success<ReturnType<typeof getWeightsAndVolEff>>;
+class TelegramService extends Context.Service<
+  TelegramService,
+  {
+    send(message: string): Effect.Effect<void, TelegramError>;
+  }
+>()("extended-yolo/TelegramService") {
+  static readonly layer = Layer.effect(
+    TelegramService,
+    Effect.gen(function* () {
+      const send = Effect.fn("TelegramService.send")(function* (message: string) {
+        yield* Effect.tryPromise({
+          try: () => sendTelegramMessage(message),
+          catch: (cause) => new TelegramError({ message: "Telegram send failed", cause }),
+        });
+      });
+      return TelegramService.of({ send });
+    }),
+  );
+}
 
-const getConfigEff = Effect.tryPromise({
-  try: () => getConfig("hyperliquid"),
-  catch: (e) => new ConfigError({ message: "Retreiving Config Failed", cause: e }),
-});
+type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
+type TTicker = Database["public"]["Tables"]["ticker"]["Row"];
 
-const getTickersEff = Effect.tryPromise({
-  try: () => getTickers(),
-  catch: (e) => new ConfigError({ message: "Retreiving Tickers Failed", cause: e }),
-});
+export type WeightedTicker = {
+  ticker: string;
+  token_allocation: BN;
+};
 
-const getWeightsAndVolEff = (config: Config) =>
-  Effect.tryPromise({
-    try: () => getWeightsAndVolatilities(config),
-    catch: (e) =>
-      new ConfigError({
-        message: "Retreiving Weights and Vol Failed",
-        cause: e,
-      }),
-  });
+class MarketDataService extends Context.Service<
+  MarketDataService,
+  {
+    getConfig: Effect.Effect<TConfig, ConfigError>;
+    getTickers: Effect.Effect<TTicker[], ConfigError>;
+    getWeightsAndVolatilities(config: TConfig): Effect.Effect<WeightedTicker[], ConfigError>;
+  }
+>()("extended-yolo/MarketDataService") {
+  static readonly layer = Layer.effect(
+    MarketDataService,
+    Effect.gen(function* () {
+      const getConfig_ = Effect.fn("MarketDataService.getConfig")(function* () {
+        return yield* Effect.tryPromise({
+          try: () => getConfig("hyperliquid"),
+          catch: (cause) => new ConfigError({ message: "Retrieving config failed", cause }),
+        });
+      });
 
-const clearingHouseStateEff = HyperliquidService.use((h) =>
-  Effect.tryPromise({
-    try: () => h.infoClient.clearinghouseState({ user: h.wallet }),
-    catch: (e) => new HyperliquidError({ message: "Clearinghouse state failed", cause: e }),
-  }),
-);
+      const getTickers_ = Effect.fn("MarketDataService.getTickers")(function* () {
+        return yield* Effect.tryPromise({
+          try: () => getTickers(),
+          catch: (cause) => new ConfigError({ message: "Retrieving tickers failed", cause }),
+        });
+      });
 
-const metaEff = HyperliquidService.use((h) =>
-  Effect.tryPromise({
-    try: () => h.infoClient.meta(),
-    catch: (e) => new HyperliquidError({ message: "Meta failed", cause: e }),
-  }),
-);
+      const getWeightsAndVolatilities_ = Effect.fn("MarketDataService.getWeightsAndVolatilities")(
+        function* (config: TConfig) {
+          return yield* Effect.tryPromise({
+            try: () => getWeightsAndVolatilities(config),
+            catch: (cause) =>
+              new ConfigError({
+                message: "Retrieving weights and vols failed",
+                cause,
+              }),
+          });
+        },
+      );
+
+      return MarketDataService.of({
+        getConfig: getConfig_,
+        getTickers: getTickers_,
+        getWeightsAndVolatilities: getWeightsAndVolatilities_,
+      });
+    }),
+  );
+}
 
 const calculateDesiredPositions = (
-  volAndWeight: WeightsAndVols,
-  tickers: Tickers,
-  config: Database["public"]["Tables"]["exchange"]["Row"],
+  volAndWeight: WeightedTicker[],
+  tickers: TTicker[],
+  config: TConfig,
   markets: MetaResponse["universe"],
 ) => {
   const tickerMap = new Map(
