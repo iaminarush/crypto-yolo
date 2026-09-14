@@ -53,8 +53,6 @@ const SLEEP_MS = 2250;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
 const MINIMUM_ORDER_VALUE = BN(10);
 
-export const handler: Handler = () => {};
-
 class HyperliquidService extends Context.Service<
   HyperliquidService,
   {
@@ -217,8 +215,8 @@ export type WeightedTicker = {
   token_allocation: BN;
 };
 
-class MarketDataService extends Context.Service<
-  MarketDataService,
+class TradingConfigService extends Context.Service<
+  TradingConfigService,
   {
     getConfig: Effect.Effect<TConfig, ConfigError>;
     getTickers: Effect.Effect<TTicker[], ConfigError>;
@@ -226,21 +224,21 @@ class MarketDataService extends Context.Service<
   }
 >()("extended-yolo/MarketDataService") {
   static readonly layer = Layer.effect(
-    MarketDataService,
+    TradingConfigService,
     Effect.gen(function* () {
       const getConfig_ = Effect.fn("MarketDataService.getConfig")(function* () {
         return yield* Effect.tryPromise({
           try: () => getConfig("hyperliquid"),
           catch: (cause) => new ConfigError({ message: "Retrieving config failed", cause }),
         });
-      });
+      })();
 
       const getTickers_ = Effect.fn("MarketDataService.getTickers")(function* () {
         return yield* Effect.tryPromise({
           try: () => getTickers(),
           catch: (cause) => new ConfigError({ message: "Retrieving tickers failed", cause }),
         });
-      });
+      })();
 
       const getWeightsAndVolatilities_ = Effect.fn("MarketDataService.getWeightsAndVolatilities")(
         function* (config: TConfig) {
@@ -255,7 +253,7 @@ class MarketDataService extends Context.Service<
         },
       );
 
-      return MarketDataService.of({
+      return TradingConfigService.of({
         getConfig: getConfig_,
         getTickers: getTickers_,
         getWeightsAndVolatilities: getWeightsAndVolatilities_,
@@ -385,3 +383,21 @@ function getMinOrderSizeChange(szDecimals: number): BN {
 function roundToDecimal(value: BN, szDecimals: number, roundingMode?: BN.RoundingMode) {
   return value.decimalPlaces(szDecimals, roundingMode);
 }
+
+const AppLayer = Layer.mergeAll(
+  HyperliquidService.layer,
+  TradingConfigService.layer,
+  TelegramService.layer,
+);
+
+const program = Effect.gen(function* () {
+  const hl = yield* HyperliquidService;
+  const tradingConfig = yield* TradingConfigService;
+  const telegram = yield* TelegramService;
+
+  const config = yield* tradingConfig.getConfig;
+  const volAndWeight = yield* tradingConfig.getWeightsAndVolatilities(config);
+  const tickers = yield* tradingConfig.getTickers;
+});
+
+export const handler: Handler = () => {};
