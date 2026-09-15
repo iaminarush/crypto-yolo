@@ -66,7 +66,7 @@ class HyperliquidService extends Context.Service<
     >;
     readonly meta: Effect.Effect<MetaResponse, HyperliquidError>;
     readonly allMids: Effect.Effect<AllMidsResponse, HyperliquidError>;
-    l2Book(coin: string): Effect.Effect<L2BookResponse, HyperliquidError>;
+    readonly l2Book: (coin: string) => Effect.Effect<L2BookResponse, HyperliquidError>;
     readonly openOrders: Effect.Effect<OpenOrdersResponse, HyperliquidError>;
 
     // placeLimitOrder(args: {
@@ -83,7 +83,7 @@ class HyperliquidService extends Context.Service<
     //   cancels: { ticker: string; oid: number }[],
     // ): Effect.Effect<CancelSuccessResponse, OrderError>;
   }
->()("extended-yolo/HyperliquidService") {
+>()("Hyperliquid/HyperliquidService") {
   static readonly layer = Layer.effect(
     HyperliquidService,
     Effect.gen(function* () {
@@ -118,7 +118,7 @@ class HyperliquidService extends Context.Service<
               cause,
             }),
         });
-      })();
+      });
 
       const spotClearinghouseState = Effect.fn("HyperliquidService.spotClearinghouseState")(
         function* () {
@@ -131,14 +131,14 @@ class HyperliquidService extends Context.Service<
               }),
           });
         },
-      )();
+      );
 
       const meta = Effect.fn("HyperliquidService.meta")(function* () {
         return yield* Effect.tryPromise({
           try: () => client.meta(),
           catch: (cause) => new HyperliquidError({ message: "Retreiving Meta Failed", cause }),
         });
-      })();
+      });
 
       const allMids = Effect.fn("HyperliquidService.allMids")(function* () {
         return yield* Effect.tryPromise({
@@ -149,7 +149,7 @@ class HyperliquidService extends Context.Service<
               cause,
             }),
         });
-      })();
+      });
 
       const l2Book = Effect.fn("HyperliquidService.l2Book")(function* (coin: string) {
         return yield* Effect.tryPromise({
@@ -171,17 +171,17 @@ class HyperliquidService extends Context.Service<
               cause,
             }),
         });
-      })();
+      });
 
       return HyperliquidService.of({
         wallet: WALLET,
         converter,
-        clearinghouseState,
-        spotClearinghouseState,
-        meta,
-        allMids,
+        clearinghouseState: clearinghouseState(),
+        spotClearinghouseState: spotClearinghouseState(),
+        meta: meta(),
+        allMids: allMids(),
         l2Book,
-        openOrders,
+        openOrders: openOrders(),
       });
     }),
   );
@@ -192,7 +192,7 @@ class TelegramService extends Context.Service<
   {
     send(message: string): Effect.Effect<void, TelegramError>;
   }
->()("extended-yolo/TelegramService") {
+>()("crypto-yolo/TelegramService") {
   static readonly layer = Layer.effect(
     TelegramService,
     Effect.gen(function* () {
@@ -218,14 +218,14 @@ export type WeightedTicker = {
 class TradingConfigService extends Context.Service<
   TradingConfigService,
   {
-    getConfig: Effect.Effect<TConfig, ConfigError>;
-    getTickers: Effect.Effect<TTicker[], ConfigError>;
-    getWeightsAndVolatilities(config: TConfig): Effect.Effect<WeightedTicker[], ConfigError>;
-    // readonly getWeightsAndVolatilities: (
-    //   config: TConfig,
-    // ) => Effect.Effect<WeightedTicker[], ConfigError>;
+    readonly getConfig: Effect.Effect<TConfig, ConfigError>;
+    readonly getTickers: Effect.Effect<TTicker[], ConfigError>;
+    // getWeightsAndVolatilities(config: TConfig): Effect.Effect<WeightedTicker[], ConfigError>;
+    readonly getWeightsAndVolatilities: (
+      config: TConfig,
+    ) => Effect.Effect<WeightedTicker[], ConfigError>;
   }
->()("extended-yolo/MarketDataService") {
+>()("Hyperliquid/MarketDataService") {
   static readonly layer = Layer.effect(
     TradingConfigService,
     Effect.gen(function* () {
@@ -234,14 +234,14 @@ class TradingConfigService extends Context.Service<
           try: () => getConfig("hyperliquid"),
           catch: (cause) => new ConfigError({ message: "Retrieving config failed", cause }),
         });
-      })();
+      });
 
       const getTickers_ = Effect.fn("MarketDataService.getTickers")(function* () {
         return yield* Effect.tryPromise({
           try: () => getTickers(),
           catch: (cause) => new ConfigError({ message: "Retrieving tickers failed", cause }),
         });
-      })();
+      });
 
       const getWeightsAndVolatilities_ = Effect.fn("MarketDataService.getWeightsAndVolatilities")(
         function* (config: TConfig) {
@@ -257,8 +257,8 @@ class TradingConfigService extends Context.Service<
       );
 
       return TradingConfigService.of({
-        getConfig: getConfig_,
-        getTickers: getTickers_,
+        getConfig: getConfig_(),
+        getTickers: getTickers_(),
         getWeightsAndVolatilities: getWeightsAndVolatilities_,
       });
     }),
