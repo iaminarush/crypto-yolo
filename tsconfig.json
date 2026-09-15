@@ -1,59 +1,59 @@
 {
-  "$schema": "./node_modules/@effect/tsgo/schema.json",
-  "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "module": "preserve",
-    // "module": "nodenext",
-    "moduleDetection": "force",
-    "allowJs": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "strict": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "noEmit": true,
-    "types": ["node"],
-    "allowImportingTsExtensions": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    },
-    "incremental": true,
-    "composite": true,
-    // "verbatimModuleSyntax": true,
-    // "rewriteRelativeImportExtensions": true,
-    "plugins": [
-      {
-        "name": "@effect/language-service",
-        "diagnosticSeverity": {
-          "abortControllerInEffect": "warning",
-          "asyncFunction": "warning",
-          "cryptoRandomUUID": "warning",
-          "cryptoRandomUUIDInEffect": "warning",
-          "extendsNativeError": "warning",
-          "globalConsole": "warning",
-          "globalConsoleInEffect": "warning",
-          "globalDate": "warning",
-          "globalDateInEffect": "warning",
-          "globalFetch": "warning",
-          "globalFetchInEffect": "warning",
-          "globalRandom": "warning",
-          "globalRandomInEffect": "warning",
-          "globalTimers": "warning",
-          "globalTimersInEffect": "warning",
-          "instanceOfSchema": "warning",
-          "newPromise": "warning",
-          "nodeBuiltinImport": "warning",
-          "preferSchemaOverJson": "warning",
-          "processEnv": "warning",
-          "processEnvInEffect": "warning",
-          "unsafeEffectTypeAssertion": "warning"
-        }
-      }
-    ]
-  },
-  "include": ["sst-env.d.ts", "sst.config.ts", "src/**/*", "database.types.ts"]
+	"$schema": "./node_modules/@effect/tsgo/schema.json",
+	"compilerOptions": {
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"module": "preserve",
+		// "module": "nodenext",
+		"moduleDetection": "force",
+		"allowJs": true,
+		"skipLibCheck": true,
+		"esModuleInterop": true,
+		"allowSyntheticDefaultImports": true,
+		"strict": true,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"noEmit": true,
+		"types": ["node"],
+		"allowImportingTsExtensions": true,
+		// "baseUrl": ".",
+		"paths": {
+			"@/*": ["./src/*"]
+		},
+		"incremental": true,
+		"composite": true,
+		// "verbatimModuleSyntax": true,
+		// "rewriteRelativeImportExtensions": true,
+		"plugins": [
+			{
+				"name": "@effect/language-service",
+				"diagnosticSeverity": {
+					"abortControllerInEffect": "warning",
+					"asyncFunction": "warning",
+					"cryptoRandomUUID": "warning",
+					"cryptoRandomUUIDInEffect": "warning",
+					"extendsNativeError": "warning",
+					"globalConsole": "warning",
+					"globalConsoleInEffect": "warning",
+					"globalDate": "warning",
+					"globalDateInEffect": "warning",
+					"globalFetch": "warning",
+					"globalFetchInEffect": "warning",
+					"globalRandom": "warning",
+					"globalRandomInEffect": "warning",
+					"globalTimers": "warning",
+					"globalTimersInEffect": "warning",
+					"instanceOfSchema": "warning",
+					"newPromise": "warning",
+					"nodeBuiltinImport": "warning",
+					"preferSchemaOverJson": "warning",
+					"processEnv": "warning",
+					"processEnvInEffect": "warning",
+					"unsafeEffectTypeAssertion": "warning"
+				}
+			}
+		]
+	},
+	"include": ["sst-env.d.ts", "sst.config.ts", "src/**/*", "database.types.ts"]
 }
