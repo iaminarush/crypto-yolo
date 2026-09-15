@@ -14,11 +14,11 @@ import {
 import { SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type { Handler } from "aws-lambda";
 import BN from "bignumber.js";
-import type { Database } from "database.types";
 import { Context, Effect, Layer, Schema } from "effect";
 import { Resource } from "sst";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import type { Database } from "../database.types";
 import { getConfig, getTickers, getWeightsAndVolatilities } from "./api";
 import { createLimitOrder } from "./hyperliquid/create-limit-order";
 import { sendTelegramMessage } from "./util";
@@ -221,6 +221,9 @@ class TradingConfigService extends Context.Service<
     getConfig: Effect.Effect<TConfig, ConfigError>;
     getTickers: Effect.Effect<TTicker[], ConfigError>;
     getWeightsAndVolatilities(config: TConfig): Effect.Effect<WeightedTicker[], ConfigError>;
+    // readonly getWeightsAndVolatilities: (
+    //   config: TConfig,
+    // ) => Effect.Effect<WeightedTicker[], ConfigError>;
   }
 >()("extended-yolo/MarketDataService") {
   static readonly layer = Layer.effect(
