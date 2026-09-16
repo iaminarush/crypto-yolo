@@ -11,17 +11,17 @@ import {
   type OrderSuccessResponse,
   type SpotClearinghouseStateResponse,
 } from "@nktkas/hyperliquid";
-import { SymbolConverter } from "@nktkas/hyperliquid/utils";
+import { formatPrice, SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type { Handler } from "aws-lambda";
 import BN from "bignumber.js";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Clock, Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
 import { Resource } from "sst";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "../database.types";
 import { getConfig, getTickers, getWeightsAndVolatilities } from "./api";
-import { createLimitOrder } from "./hyperliquid/create-limit-order";
 import { sendTelegramMessage } from "./util";
+import { filter } from "lodash-es";
 
 class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String,
@@ -58,6 +58,8 @@ class HyperliquidService extends Context.Service<
   {
     readonly wallet: Hex;
     readonly converter: SymbolConverter;
+    readonly client: InfoClient;
+    readonly exchange: ExchangeClient;
 
     readonly clearinghouseState: Effect.Effect<ClearinghouseStateResponse, HyperliquidError>;
     readonly spotClearinghouseState: Effect.Effect<
@@ -69,11 +71,11 @@ class HyperliquidService extends Context.Service<
     readonly l2Book: (coin: string) => Effect.Effect<L2BookResponse, HyperliquidError>;
     readonly openOrders: Effect.Effect<OpenOrdersResponse, HyperliquidError>;
 
-    // placeLimitOrder(args: {
-    //   ticker: string;
-    //   size: BN;
-    //   side: "BUY" | "SELL";
-    // }): Effect.Effect<OrderSuccessResponse, OrderError>;
+    placeLimitOrder(args: {
+      ticker: string;
+      size: BN;
+      side: "BUY" | "SELL";
+    }): Effect.Effect<OrderSuccessResponse, OrderError>;
     // placeMarketOrder(args: {
     //   ticker: string;
     //   size: BN;
@@ -173,19 +175,99 @@ class HyperliquidService extends Context.Service<
         });
       });
 
+      const placeLimitOrder = Effect.fn("HyperliquidService.placeLimitOrder")(function* ({
+        ticker,
+        size,
+        side,
+      }: {
+        ticker: string;
+        size: BN;
+        side: "BUY" | "SELL";
+      }) {
+        return yield* Effect.tryPromise({
+          try: () =>
+            createLimitOrder({
+              ticker,
+              size,
+              side,
+            }),
+          catch: (cause) => new OrderError({ message: "Limit order failed", cause }),
+        });
+      });
+
       return HyperliquidService.of({
         wallet: WALLET,
         converter,
+        client,
+        exchange,
         clearinghouseState: clearinghouseState(),
         spotClearinghouseState: spotClearinghouseState(),
         meta: meta(),
         allMids: allMids(),
         l2Book,
         openOrders: openOrders(),
+        placeLimitOrder,
       });
     }),
   );
 }
+
+const createLimitOrder = Effect.fn("Hyperliquid.createLimitOrder")(function* ({
+  ticker,
+  size,
+  side,
+}: {
+  ticker: string;
+  size: BN;
+  side: "BUY" | "SELL";
+}) {
+  const hl = yield* HyperliquidService;
+  const converter = hl.converter;
+  const client = hl.client;
+  const exchange = hl.exchange;
+
+  const isBuy = side === "BUY";
+  const assetId = converter.getAssetId(ticker);
+  const szDecimals = converter.getSzDecimals(ticker);
+
+  if (assetId === undefined || szDecimals === undefined)
+    return {
+      status: "skipped",
+      reason: "AssetId or szDecimals not found",
+    } as const;
+
+  const attempt = Effect.gen(function* () {
+    const book = yield* hl.l2Book(ticker);
+    const price = book?.levels[isBuy ? 0 : 1][0].px;
+    if (!price) {
+      return { status: "skipped", reason: "No bid/ask price found" };
+    }
+
+    return yield* Effect.tryPromise({
+      try: () =>
+        exchange.order({
+          orders: [
+            {
+              a: assetId,
+              b: isBuy,
+              p: formatPrice(price, szDecimals),
+              s: size.toNumber(),
+              r: false,
+              t: { limit: { tif: "Alo" } },
+            },
+          ],
+        }),
+      catch: (cause) => new OrderError({ ticker, message: "Order placement failed", cause }),
+    });
+  });
+
+  const retryPolicy = Schedule.forever.pipe(
+    Schedule.addDelay(() => Effect.succeed("2000 millis")),
+    Schedule.jittered,
+  );
+
+  return yield* attempt.pipe(Effect.retry(retryPolicy));
+});
 
 class TelegramService extends Context.Service<
   TelegramService,
@@ -394,6 +476,7 @@ const AppLayer = Layer.mergeAll(
 );
 
 const program = Effect.gen(function* () {
+  const startTime = yield* Clock.currentTimeMillis;
   const hl = yield* HyperliquidService;
   const tradingConfig = yield* TradingConfigService;
   const telegram = yield* TelegramService;
@@ -401,6 +484,18 @@ const program = Effect.gen(function* () {
   const config = yield* tradingConfig.getConfig;
   const volAndWeight = yield* tradingConfig.getWeightsAndVolatilities(config);
   const tickers = yield* tradingConfig.getTickers;
+  const { assetPositions } = yield* hl.clearinghouseState;
+  const meta = yield* hl.meta;
+
+  const desiredPositions = calculateDesiredPositions(volAndWeight, tickers, config, meta.universe);
+  const tickersToRebalance = filterTickersToRebalance(desiredPositions, assetPositions);
+
+  const rebalanceLoop = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    if (now - startTime >= MAX_RUNTIME_MS || tickersToRebalance.size === 0) return;
+
+    yield* Effect.sleep(Duration.millis(SLEEP_MS));
+  });
 });
 
 export const handler: Handler = () => {};
