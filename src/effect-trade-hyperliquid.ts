@@ -71,21 +71,24 @@ class HyperliquidService extends Context.Service<
     readonly l2Book: (coin: string) => Effect.Effect<L2BookResponse, HyperliquidError>;
     readonly openOrders: Effect.Effect<OpenOrdersResponse, HyperliquidError>;
 
-    placeLimitOrder(args: {
+    createLimitOrder(args: {
       ticker: string;
       size: BN;
       side: "BUY" | "SELL";
-    }): Effect.Effect<OrderSuccessResponse, OrderError>;
+    }): Effect.Effect<
+      OrderSuccessResponse | { status: "skipped"; reason: string },
+      HyperliquidError | OrderError
+    >;
     // placeMarketOrder(args: {
     //   ticker: string;
     //   size: BN;
     //   side: "BUY" | "SELL";
     // }): Effect.Effect<OrderSuccessResponse, OrderError>;
-    // cancelOrders(
-    //   cancels: { ticker: string; oid: number }[],
-    // ): Effect.Effect<CancelSuccessResponse, OrderError>;
+    cancelOrders: (
+      cancels: { ticker: string; oid: number }[],
+    ) => Effect.Effect<CancelSuccessResponse, OrderError>;
   }
->()("Hyperliquid/HyperliquidService") {
+>()("HyperliquidService") {
   static readonly layer = Layer.effect(
     HyperliquidService,
     Effect.gen(function* () {
@@ -175,7 +178,7 @@ class HyperliquidService extends Context.Service<
         });
       });
 
-      const placeLimitOrder = Effect.fn("HyperliquidService.placeLimitOrder")(function* ({
+      const createLimitOrder = Effect.fn("Hyperliquid.createLimitOrder")(function* ({
         ticker,
         size,
         side,
@@ -184,16 +187,58 @@ class HyperliquidService extends Context.Service<
         size: BN;
         side: "BUY" | "SELL";
       }) {
-        return yield* Effect.tryPromise({
-          try: () =>
-            createLimitOrder({
-              ticker,
-              size,
-              side,
-            }),
-          catch: (cause) => new OrderError({ message: "Limit order failed", cause }),
+        const isBuy = side === "BUY";
+        const assetId = converter.getAssetId(ticker);
+        const szDecimals = converter.getSzDecimals(ticker);
+
+        if (assetId === undefined || szDecimals === undefined)
+          return {
+            status: "skipped",
+            reason: "AssetId or szDecimals not found",
+          } as const;
+
+        const attempt = Effect.gen(function* () {
+          const book = yield* l2Book(ticker);
+          const price = book?.levels[isBuy ? 0 : 1]?.[0]?.px;
+          if (!price) {
+            return {
+              status: "skipped",
+              reason: "No bid/ask price found",
+            } as const;
+          }
+
+          return yield* Effect.tryPromise({
+            try: () =>
+              exchange.order({
+                orders: [
+                  {
+                    a: assetId,
+                    b: isBuy,
+                    p: formatPrice(price, szDecimals),
+                    s: size.toNumber(),
+                    r: false,
+                    t: { limit: { tif: "Alo" } },
+                  },
+                ],
+              }),
+            catch: (cause) =>
+              new OrderError({
+                ticker,
+                message: "Order placement failed",
+                cause,
+              }),
+          });
         });
+
+        const retryPolicy = Schedule.forever.pipe(
+          Schedule.addDelay(() => Effect.succeed("2000 millis")),
+          Schedule.jittered,
+        );
+
+        return yield* attempt.pipe(Effect.retry(retryPolicy));
       });
+
+      const cancelOrders = Effect.fn("HyperliquidService.cancelOrders")(function* (cancels) {});
 
       return HyperliquidService.of({
         wallet: WALLET,
@@ -206,68 +251,12 @@ class HyperliquidService extends Context.Service<
         allMids: allMids(),
         l2Book,
         openOrders: openOrders(),
-        placeLimitOrder,
+        createLimitOrder,
+        cancelOrders,
       });
     }),
   );
 }
-
-const createLimitOrder = Effect.fn("Hyperliquid.createLimitOrder")(function* ({
-  ticker,
-  size,
-  side,
-}: {
-  ticker: string;
-  size: BN;
-  side: "BUY" | "SELL";
-}) {
-  const hl = yield* HyperliquidService;
-  const converter = hl.converter;
-  const client = hl.client;
-  const exchange = hl.exchange;
-
-  const isBuy = side === "BUY";
-  const assetId = converter.getAssetId(ticker);
-  const szDecimals = converter.getSzDecimals(ticker);
-
-  if (assetId === undefined || szDecimals === undefined)
-    return {
-      status: "skipped",
-      reason: "AssetId or szDecimals not found",
-    } as const;
-
-  const attempt = Effect.gen(function* () {
-    const book = yield* hl.l2Book(ticker);
-    const price = book?.levels[isBuy ? 0 : 1][0].px;
-    if (!price) {
-      return { status: "skipped", reason: "No bid/ask price found" };
-    }
-
-    return yield* Effect.tryPromise({
-      try: () =>
-        exchange.order({
-          orders: [
-            {
-              a: assetId,
-              b: isBuy,
-              p: formatPrice(price, szDecimals),
-              s: size.toNumber(),
-              r: false,
-              t: { limit: { tif: "Alo" } },
-            },
-          ],
-        }),
-      catch: (cause) => new OrderError({ ticker, message: "Order placement failed", cause }),
-    });
-  });
-
-  const retryPolicy = Schedule.forever.pipe(
-    Schedule.addDelay(() => Effect.succeed("2000 millis")),
-    Schedule.jittered,
-  );
-
-  return yield* attempt.pipe(Effect.retry(retryPolicy));
-});
 
 class TelegramService extends Context.Service<
   TelegramService,
@@ -495,6 +484,60 @@ const program = Effect.gen(function* () {
     if (now - startTime >= MAX_RUNTIME_MS || tickersToRebalance.size === 0) return;
 
     yield* Effect.sleep(Duration.millis(SLEEP_MS));
+
+    // const allMids = Effect.tryPromise({
+    //   try: () => hl.client.allMids(),
+    //   catch: (cause) => new HyperliquidError({ message: "allMids failed", cause }),
+    // });
+
+    const allMids = yield* hl.allMids;
+
+    const orders = yield* hl.openOrders;
+    const { assetPositions: updatedPositions } = yield* hl.clearinghouseState;
+
+    for (const [ticker, desiredPosition] of tickersToRebalance) {
+      const order = orders.find((o) => o.coin === ticker);
+
+      if (!order) {
+        const currentPosition = updatedPositions.find((p) => p.position.coin === ticker);
+        const { size, side } = calculateOrderSize(
+          desiredPosition,
+          BN(currentPosition ? currentPosition.position.szi : 0),
+          allMids,
+        );
+
+        if (size.gt(0)) {
+          yield* hl.createLimitOrder({ ticker, size, side });
+        } else {
+          tickersToRebalance.delete(ticker);
+        }
+      } else {
+        const book = yield* hl.l2Book(ticker);
+        const bestPrice = book?.levels[order.side === "B" ? 0 : 1]?.[0].px;
+
+        if (bestPrice && BN(order.limitPx).eq(bestPrice)) continue;
+
+        //TODO: Cancel order
+
+        const currentPosition = updatedPositions.find((p) => p.position.coin === ticker);
+
+        const { size, side } = calculateOrderSize(
+          desiredPosition,
+          currentPosition ? BN(currentPosition.position.szi) : BN(0),
+          allMids,
+        );
+
+        if (size.gt(0)) {
+          yield* hl.createLimitOrder({
+            ticker,
+            size,
+            side,
+          });
+        } else {
+          tickersToRebalance.delete(ticker);
+        }
+      }
+    }
   });
 });
 
