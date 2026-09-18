@@ -1,5 +1,6 @@
 import {
   type AllMidsResponse,
+  ApiRequestError,
   type CancelSuccessResponse,
   type ClearinghouseStateResponse,
   ExchangeClient,
@@ -14,14 +15,13 @@ import {
 import { formatPrice, SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type { Handler } from "aws-lambda";
 import BN from "bignumber.js";
-import { Clock, Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
+import { Clock, Context, Duration, Effect, Layer, Result, Schedule, Schema } from "effect";
 import { Resource } from "sst";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "../database.types";
 import { getConfig, getTickers, getWeightsAndVolatilities } from "./api";
 import { sendTelegramMessage } from "./util";
-import { filter } from "lodash-es";
 
 class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String,
@@ -36,6 +36,13 @@ class TickerMappingError extends Schema.TaggedError<TickerMappingError>()("Ticke
 class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   ticker: Schema.String,
   message: Schema.String,
+  cause: Schema.Defect(),
+}) {}
+
+class CancelOrderError extends Schema.TaggedError<CancelOrderError>()("CancelOrderError", {
+  ticker: Schema.String,
+  orderId: Schema.Finite,
+  reason: Schema.Literals(["alreadyFilled", "unexpected"]),
   cause: Schema.Defect(),
 }) {}
 
@@ -84,9 +91,9 @@ class HyperliquidService extends Context.Service<
     //   size: BN;
     //   side: "BUY" | "SELL";
     // }): Effect.Effect<OrderSuccessResponse, OrderError>;
-    cancelOrders: (
-      cancels: { ticker: string; oid: number }[],
-    ) => Effect.Effect<CancelSuccessResponse, OrderError>;
+    cancelOrder: (
+      orders: OpenOrdersResponse[number],
+    ) => Effect.Effect<CancelSuccessResponse, CancelOrderError>;
   }
 >()("HyperliquidService") {
   static readonly layer = Layer.effect(
@@ -238,7 +245,23 @@ class HyperliquidService extends Context.Service<
         return yield* attempt.pipe(Effect.retry(retryPolicy));
       });
 
-      const cancelOrders = Effect.fn("HyperliquidService.cancelOrders")(function* (cancels) {});
+      const cancelOrder = Effect.fn("HyperliquidService.cancelOrders")(function* (
+        order: OpenOrdersResponse[number],
+      ) {
+        return yield* Effect.tryPromise({
+          try: () =>
+            exchange.cancel({
+              cancels: [{ a: converter.getAssetId(order.coin) || "", o: order.oid }],
+            }),
+          catch: (cause) =>
+            new CancelOrderError({
+              ticker: order.coin,
+              orderId: order.oid,
+              reason: cause instanceof ApiRequestError ? "alreadyFilled" : "unexpected",
+              cause,
+            }),
+        });
+      });
 
       return HyperliquidService.of({
         wallet: WALLET,
@@ -252,7 +275,7 @@ class HyperliquidService extends Context.Service<
         l2Book,
         openOrders: openOrders(),
         createLimitOrder,
-        cancelOrders,
+        cancelOrder,
       });
     }),
   );
@@ -517,7 +540,17 @@ const program = Effect.gen(function* () {
 
         if (bestPrice && BN(order.limitPx).eq(bestPrice)) continue;
 
-        //TODO: Cancel order
+        const cancelResult = yield* Effect.result(hl.cancelOrder(order));
+
+        if (Result.isFailure(cancelResult)) {
+          const { reason } = cancelResult.failure;
+          if (reason === "alreadyFilled") continue;
+
+          yield* Effect.logWarning(
+            `Cancel failed for ${order.coin} ${order.oid}`,
+            cancelResult.failure,
+          );
+        }
 
         const currentPosition = updatedPositions.find((p) => p.position.coin === ticker);
 
