@@ -1,7 +1,6 @@
 import {
   type AllMidsResponse,
   ApiRequestError,
-  type CancelSuccessResponse,
   type ClearinghouseStateResponse,
   ExchangeClient,
   HttpTransport,
@@ -22,6 +21,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "../database.types";
 import { getConfig, getTickers, getWeightsAndVolatilities } from "./api";
 import { sendTelegramMessage } from "./util";
+import { SLIPPAGE } from "./constants";
 
 class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String,
@@ -30,19 +30,12 @@ class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
 
 class TickerMappingError extends Schema.TaggedError<TickerMappingError>()("TickerMappingError", {
   ticker: Schema.String,
-  message: Schema.Defect(),
+  message: Schema.String,
 }) {}
 
 class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   ticker: Schema.String,
   message: Schema.String,
-  cause: Schema.Defect(),
-}) {}
-
-class CancelOrderError extends Schema.TaggedError<CancelOrderError>()("CancelOrderError", {
-  ticker: Schema.String,
-  orderId: Schema.Finite,
-  reason: Schema.Literals(["alreadyFilled", "unexpected"]),
   cause: Schema.Defect(),
 }) {}
 
@@ -86,14 +79,13 @@ class HyperliquidService extends Context.Service<
       OrderSuccessResponse | { status: "skipped"; reason: string },
       HyperliquidError | OrderError
     >;
-    // placeMarketOrder(args: {
-    //   ticker: string;
-    //   size: BN;
-    //   side: "BUY" | "SELL";
-    // }): Effect.Effect<OrderSuccessResponse, OrderError>;
-    cancelOrder: (
-      orders: OpenOrdersResponse[number],
-    ) => Effect.Effect<CancelSuccessResponse, CancelOrderError>;
+    createMarketOrder(args: {
+      ticker: string;
+      size: BN;
+      side: "BUY" | "SELL";
+      currentPosition: ClearinghouseStateResponse["assetPositions"][number];
+    }): Effect.Effect<OrderSuccessResponse, OrderError>;
+    cancelOrders: (order: OpenOrdersResponse) => Effect.Effect<void, HyperliquidError>;
   }
 >()("HyperliquidService") {
   static readonly layer = Layer.effect(
@@ -245,21 +237,42 @@ class HyperliquidService extends Context.Service<
         return yield* attempt.pipe(Effect.retry(retryPolicy));
       });
 
-      const cancelOrder = Effect.fn("HyperliquidService.cancelOrders")(function* (
-        order: OpenOrdersResponse[number],
+      // const createMarketOrder = Effect.fn("Hyperliquid.createLimitOrder")(function* ({
+      //   ticker,
+      //   size,
+      //   side,
+      // }: {
+      //   ticker: string;
+      //   size: BN;
+      //   side: "BUY" | "SELL";
+      // }) {
+      //
+      //   }
+
+      const createMarketOrder = Effect.fn("Hyperliquid.createMarketOrder")(function* ({
+        ticker,
+        size,
+        side,
+      }: {
+        ticker: string;
+        size: BN;
+        side: "BUY" | "SELL";
+      }) {
+        // Effect.tryPromise({ try: () => exchange.order({ orders: [] }) });
+      });
+
+      const cancelOrders = Effect.fn("HyperliquidService.cancelOrders")(function* (
+        orders: OpenOrdersResponse,
       ) {
+        const cancels = orders.map((o) => ({ a: converter.getAssetId(o.coin) || "", o: o.oid }));
+
         return yield* Effect.tryPromise({
           try: () =>
-            exchange.cancel({
-              cancels: [{ a: converter.getAssetId(order.coin) || "", o: order.oid }],
+            exchange.cancel({ cancels }).catch((cause) => {
+              if (cause instanceof ApiRequestError) return;
+              throw cause;
             }),
-          catch: (cause) =>
-            new CancelOrderError({
-              ticker: order.coin,
-              orderId: order.oid,
-              reason: cause instanceof ApiRequestError ? "alreadyFilled" : "unexpected",
-              cause,
-            }),
+          catch: (cause) => new HyperliquidError({ message: "Cancel request failed", cause }),
         });
       });
 
@@ -275,7 +288,8 @@ class HyperliquidService extends Context.Service<
         l2Book,
         openOrders: openOrders(),
         createLimitOrder,
-        cancelOrder,
+        createMarketOrder,
+        cancelOrders,
       });
     }),
   );
@@ -359,48 +373,54 @@ class TradingConfigService extends Context.Service<
   );
 }
 
-const calculateDesiredPositions = (
+const calculateDesiredPositions = Effect.fn(function* (
   volAndWeight: WeightedTicker[],
   tickers: TTicker[],
   config: TConfig,
   markets: MetaResponse["universe"],
-) => {
+) {
   const tickerMap = new Map(
     tickers
       .filter((t) => markets.some((m) => m.name === t.hyperliquid_ticker))
       .map((t) => [t.rbw_ticker, t.hyperliquid_ticker]),
   );
 
-  return volAndWeight.map((vw) => {
-    const exchangeTicker = tickerMap.get(vw.ticker);
-    if (!exchangeTicker) throw new Error(`No hyperliquid ticker for ${vw.ticker}`);
+  return yield* Effect.forEach(volAndWeight, (vw) =>
+    Effect.gen(function* () {
+      const exchangeTicker = tickerMap.get(vw.ticker);
+      if (!exchangeTicker)
+        return yield* new TickerMappingError({
+          ticker: vw.ticker,
+          message: `No hyperliquid ticker for ${vw.ticker}`,
+        });
 
-    const tokenAllocation = vw.token_allocation;
+      const tokenAllocation = vw.token_allocation;
 
-    const isPositive = tokenAllocation.gte(0);
+      const isPositive = tokenAllocation.gte(0);
 
-    const market = markets.find((m) => m.name === exchangeTicker);
+      const market = markets.find((m) => m.name === exchangeTicker);
 
-    return {
-      rwTicker: vw.ticker,
-      exchangeTicker,
-      desiredSize: tokenAllocation,
-      upperBound: tokenAllocation.times(
-        BN(isPositive ? config.trade_buffer : -config.trade_buffer).plus(1),
-      ),
-      lowerBound: tokenAllocation.times(
-        BN(isPositive ? -config.trade_buffer : config.trade_buffer).plus(1),
-      ),
-      minOrderSizeChange: market ? getMinOrderSizeChange(market.szDecimals) : BN(0),
-      szDecimals: market ? market.szDecimals : 1,
-    };
-  });
-};
+      return {
+        rwTicker: vw.ticker,
+        exchangeTicker,
+        desiredSize: tokenAllocation,
+        upperBound: tokenAllocation.times(
+          BN(isPositive ? config.trade_buffer : -config.trade_buffer).plus(1),
+        ),
+        lowerBound: tokenAllocation.times(
+          BN(isPositive ? -config.trade_buffer : config.trade_buffer).plus(1),
+        ),
+        minOrderSizeChange: market ? getMinOrderSizeChange(market.szDecimals) : BN(0),
+        szDecimals: market ? market.szDecimals : 1,
+      };
+    }),
+  );
+});
 
-type TDesiredPosition = ReturnType<typeof calculateDesiredPositions>[number];
+type TDesiredPosition = Effect.Success<ReturnType<typeof calculateDesiredPositions>>[number];
 
 const filterTickersToRebalance = (
-  desiredPositions: TDesiredPosition[],
+  desiredPositions: readonly TDesiredPosition[],
   currentPositions: ClearinghouseStateResponse["assetPositions"],
 ) => {
   const positionMap = new Map(currentPositions.map((p) => [p.position.coin, BN(p.position.szi)]));
@@ -499,7 +519,12 @@ const program = Effect.gen(function* () {
   const { assetPositions } = yield* hl.clearinghouseState;
   const meta = yield* hl.meta;
 
-  const desiredPositions = calculateDesiredPositions(volAndWeight, tickers, config, meta.universe);
+  const desiredPositions = yield* calculateDesiredPositions(
+    volAndWeight,
+    tickers,
+    config,
+    meta.universe,
+  );
   const tickersToRebalance = filterTickersToRebalance(desiredPositions, assetPositions);
 
   const rebalanceLoop = Effect.gen(function* () {
@@ -507,11 +532,6 @@ const program = Effect.gen(function* () {
     if (now - startTime >= MAX_RUNTIME_MS || tickersToRebalance.size === 0) return;
 
     yield* Effect.sleep(Duration.millis(SLEEP_MS));
-
-    // const allMids = Effect.tryPromise({
-    //   try: () => hl.client.allMids(),
-    //   catch: (cause) => new HyperliquidError({ message: "allMids failed", cause }),
-    // });
 
     const allMids = yield* hl.allMids;
 
@@ -540,17 +560,19 @@ const program = Effect.gen(function* () {
 
         if (bestPrice && BN(order.limitPx).eq(bestPrice)) continue;
 
-        const cancelResult = yield* Effect.result(hl.cancelOrder(order));
+        yield* hl.cancelOrders([order]);
 
-        if (Result.isFailure(cancelResult)) {
-          const { reason } = cancelResult.failure;
-          if (reason === "alreadyFilled") continue;
-
-          yield* Effect.logWarning(
-            `Cancel failed for ${order.coin} ${order.oid}`,
-            cancelResult.failure,
-          );
-        }
+        // const cancelResult = yield* Effect.result(hl.cancelOrder(order));
+        //
+        // if (Result.isFailure(cancelResult)) {
+        //   const { reason } = cancelResult.failure;
+        //   if (reason === "alreadyFilled") continue;
+        //
+        //   yield* Effect.logWarning(
+        //     `Cancel failed for ${order.coin} ${order.oid}`,
+        //     cancelResult.failure,
+        //   );
+        // }
 
         const currentPosition = updatedPositions.find((p) => p.position.coin === ticker);
 
@@ -572,6 +594,26 @@ const program = Effect.gen(function* () {
       }
     }
   });
+
+  const openOrders = yield* hl.openOrders;
+  yield* hl.cancelOrders(openOrders);
+  const { assetPositions: postTradePositions } = yield* hl.clearinghouseState;
+  const tickersToMarketOrder = filterTickersToRebalance(desiredPositions, postTradePositions);
+
+  const tickersMarketOrdered: string[] = [];
+
+  for (const [ticker, desiredPosition] of tickersToMarketOrder) {
+    const allMids = yield* hl.allMids;
+    const currentPosition = postTradePositions.find((p) => p.position.coin === ticker);
+    const { size, side } = calculateOrderSize(
+      desiredPosition,
+      BN(currentPosition ? currentPosition.position.szi : 0),
+      allMids,
+    );
+
+    if (size.gt(0)) {
+    }
+  }
 });
 
 export const handler: Handler = () => {};
