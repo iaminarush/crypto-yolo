@@ -61,15 +61,15 @@ class HyperliquidService extends Context.Service<
     readonly client: InfoClient;
     readonly exchange: ExchangeClient;
 
-    readonly clearinghouseState: Effect.Effect<ClearinghouseStateResponse, HyperliquidError>;
-    readonly spotClearinghouseState: Effect.Effect<
+    readonly clearinghouseState: () => Effect.Effect<ClearinghouseStateResponse, HyperliquidError>;
+    readonly spotClearinghouseState: () => Effect.Effect<
       SpotClearinghouseStateResponse,
       HyperliquidError
     >;
-    readonly meta: Effect.Effect<MetaResponse, HyperliquidError>;
-    readonly allMids: Effect.Effect<AllMidsResponse, HyperliquidError>;
+    readonly meta: () => Effect.Effect<MetaResponse, HyperliquidError>;
+    readonly allMids: () => Effect.Effect<AllMidsResponse, HyperliquidError>;
     readonly l2Book: (coin: string) => Effect.Effect<L2BookResponse, HyperliquidError>;
-    readonly openOrders: Effect.Effect<OpenOrdersResponse, HyperliquidError>;
+    readonly openOrders: () => Effect.Effect<OpenOrdersResponse, HyperliquidError>;
 
     createLimitOrder(args: {
       ticker: string;
@@ -237,28 +237,52 @@ class HyperliquidService extends Context.Service<
         return yield* attempt.pipe(Effect.retry(retryPolicy));
       });
 
-      // const createMarketOrder = Effect.fn("Hyperliquid.createLimitOrder")(function* ({
-      //   ticker,
-      //   size,
-      //   side,
-      // }: {
-      //   ticker: string;
-      //   size: BN;
-      //   side: "BUY" | "SELL";
-      // }) {
-      //
-      //   }
-
-      const createMarketOrder = Effect.fn("Hyperliquid.createMarketOrder")(function* ({
-        ticker,
-        size,
-        side,
+      const marketOrderRebalance = Effect.fn("Hyperliquid.marketOrderRebalance")(function* ({
+        desiredPositions,
       }: {
-        ticker: string;
-        size: BN;
-        side: "BUY" | "SELL";
+        desiredPositions: TDesiredPosition[];
       }) {
-        // Effect.tryPromise({ try: () => exchange.order({ orders: [] }) });
+        const { assetPositions: currentPositions } = yield* clearinghouseState();
+
+        const tickersToMarketOrder = filterTickersToRebalance(desiredPositions, currentPositions);
+
+        const tickersMarketOrdered: string[] = [];
+        for (const [ticker, desiredPosition] of tickersToMarketOrder) {
+          const mids = yield* allMids();
+          const currentPosition = currentPositions.find((p) => p.position.coin === ticker);
+          const { size, side } = calculateOrderSize(
+            desiredPosition,
+            BN(currentPosition ? currentPosition.position.szi : 0),
+            mids,
+          );
+
+          if (size.gt(0)) {
+            const mid = mids[ticker];
+            const price = parseFloat(mid) * (1 + (side === "BUY" ? SLIPPAGE : -SLIPPAGE));
+            yield* Effect.tryPromise({
+              try: () =>
+                exchange
+                  .order({
+                    orders: [
+                      {
+                        a: converter.getAssetId(ticker) || "",
+                        b: side === "BUY",
+                        p: formatPrice(price, converter.getSzDecimals(ticker) || 0),
+                        s: size.toNumber(),
+                        r: false,
+                        t: { limit: { tif: "Ioc" } },
+                      },
+                    ],
+                  })
+                  .catch((cause) => {
+                    if (cause instanceof ApiRequestError) return;
+                    throw cause;
+                  }),
+              catch: (cause) => new HyperliquidError({ message: "Market order failed", cause }),
+            });
+            tickersMarketOrdered.push(desiredPosition.rwTicker);
+          }
+        }
       });
 
       const cancelOrders = Effect.fn("HyperliquidService.cancelOrders")(function* (
@@ -281,12 +305,12 @@ class HyperliquidService extends Context.Service<
         converter,
         client,
         exchange,
-        clearinghouseState: clearinghouseState(),
-        spotClearinghouseState: spotClearinghouseState(),
-        meta: meta(),
-        allMids: allMids(),
+        clearinghouseState,
+        spotClearinghouseState,
+        meta,
+        allMids,
         l2Book,
-        openOrders: openOrders(),
+        openOrders,
         createLimitOrder,
         createMarketOrder,
         cancelOrders,
@@ -373,6 +397,8 @@ class TradingConfigService extends Context.Service<
   );
 }
 
+type TDesiredPosition = Effect.Success<ReturnType<typeof calculateDesiredPositions>>[number];
+
 const calculateDesiredPositions = Effect.fn(function* (
   volAndWeight: WeightedTicker[],
   tickers: TTicker[],
@@ -417,7 +443,7 @@ const calculateDesiredPositions = Effect.fn(function* (
   );
 });
 
-type TDesiredPosition = Effect.Success<ReturnType<typeof calculateDesiredPositions>>[number];
+type TTickersToRebalance = ReturnType<typeof filterTickersToRebalance>;
 
 const filterTickersToRebalance = (
   desiredPositions: readonly TDesiredPosition[],
@@ -501,6 +527,16 @@ function roundToDecimal(value: BN, szDecimals: number, roundingMode?: BN.Roundin
   return value.decimalPlaces(szDecimals, roundingMode);
 }
 
+type TOrderStatus =
+  | OrderSuccessResponse["response"]["data"]["statuses"][number]
+  | { error: string };
+
+function extractOrderStatuses(response: unknown): readonly TOrderStatus[] | undefined {
+  const statuses = (response as { response?: { data?: { statuses?: unknown } } } | null | undefined)
+    ?.response?.data?.statuses;
+  return Array.isArray(statuses) ? (statuses as TOrderStatus[]) : undefined;
+}
+
 const AppLayer = Layer.mergeAll(
   HyperliquidService.layer,
   TradingConfigService.layer,
@@ -516,8 +552,8 @@ const program = Effect.gen(function* () {
   const config = yield* tradingConfig.getConfig;
   const volAndWeight = yield* tradingConfig.getWeightsAndVolatilities(config);
   const tickers = yield* tradingConfig.getTickers;
-  const { assetPositions } = yield* hl.clearinghouseState;
-  const meta = yield* hl.meta;
+  const { assetPositions } = yield* hl.clearinghouseState();
+  const meta = yield* hl.meta();
 
   const desiredPositions = yield* calculateDesiredPositions(
     volAndWeight,
@@ -533,10 +569,10 @@ const program = Effect.gen(function* () {
 
     yield* Effect.sleep(Duration.millis(SLEEP_MS));
 
-    const allMids = yield* hl.allMids;
+    const allMids = yield* hl.allMids();
 
-    const orders = yield* hl.openOrders;
-    const { assetPositions: updatedPositions } = yield* hl.clearinghouseState;
+    const orders = yield* hl.openOrders();
+    const { assetPositions: updatedPositions } = yield* hl.clearinghouseState();
 
     for (const [ticker, desiredPosition] of tickersToRebalance) {
       const order = orders.find((o) => o.coin === ticker);
@@ -595,25 +631,9 @@ const program = Effect.gen(function* () {
     }
   });
 
-  const openOrders = yield* hl.openOrders;
+  const openOrders = yield* hl.openOrders();
   yield* hl.cancelOrders(openOrders);
-  const { assetPositions: postTradePositions } = yield* hl.clearinghouseState;
-  const tickersToMarketOrder = filterTickersToRebalance(desiredPositions, postTradePositions);
-
-  const tickersMarketOrdered: string[] = [];
-
-  for (const [ticker, desiredPosition] of tickersToMarketOrder) {
-    const allMids = yield* hl.allMids;
-    const currentPosition = postTradePositions.find((p) => p.position.coin === ticker);
-    const { size, side } = calculateOrderSize(
-      desiredPosition,
-      BN(currentPosition ? currentPosition.position.szi : 0),
-      allMids,
-    );
-
-    if (size.gt(0)) {
-    }
-  }
+  const { assetPositions: postTradePositions } = yield* hl.clearinghouseState();
 });
 
 export const handler: Handler = () => {};
