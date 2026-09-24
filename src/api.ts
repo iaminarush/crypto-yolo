@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import BigNumber from "bignumber.js";
-import type { Database } from "database.types";
+import type { Database } from "../database.types";
 import ky from "ky";
 import { Resource } from "sst";
 import z from "zod";
@@ -12,11 +12,7 @@ const supabaseKey = Resource.SUPABASE_KEY.value;
 const supabase = createClient<Database>(supabaseUrl, supabaseKey);
 
 export const getConfig = async (exchange: TExchangeNames) => {
-  const { data } = await supabase
-    .from("exchange")
-    .select()
-    .eq("exchange", exchange)
-    .single();
+  const { data } = await supabase.from("exchange").select().eq("exchange", exchange).single();
 
   if (!data) throw new Error("No exchange config in DB");
 
@@ -35,11 +31,9 @@ export const getWeightsAndVolatilities = async (config: TConfig) => {
 
   const merged = weights.data.map((w) => {
     const vol = volatilities.data.find((v) => v.ticker === w.ticker);
-    if (!vol)
-      throw new Error("Non matching ticker between weights and volatilities");
+    if (!vol) throw new Error("Non matching ticker between weights and volatilities");
 
-    if (vol.ewvol <= 0)
-      throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
+    if (vol.ewvol <= 0) throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
 
     const inverseVol = new BigNumber(1).div(vol.ewvol);
     const comboWeight = new BigNumber(w.trend_megafactor)
@@ -47,9 +41,7 @@ export const getWeightsAndVolatilities = async (config: TConfig) => {
       .plus(new BigNumber(w.momentum_megafactor).times(config.momentum_weight))
       .plus(new BigNumber(w.carry_megafactor).times(config.carry_weight));
 
-    const volScaledWeight = BigNumber(
-      clamp(inverseVol.times(comboWeight).toNumber(), -0.25, 0.25),
-    );
+    const volScaledWeight = BigNumber(clamp(inverseVol.times(comboWeight).toNumber(), -0.25, 0.25));
 
     // totalVol = totalVol.plus(Math.abs(volScaledWeight.toNumber()));
     totalVol = totalVol.plus(volScaledWeight.abs());
@@ -78,9 +70,7 @@ export const getWeightsAndVolatilities = async (config: TConfig) => {
     });
   else
     return merged.map((m) => {
-      const dollarAllocation = new BigNumber(m.vol_scaled_weight).times(
-        config.allocation,
-      );
+      const dollarAllocation = new BigNumber(m.vol_scaled_weight).times(config.allocation);
       return {
         // ...m,
         ticker: m.ticker,
@@ -91,10 +81,7 @@ export const getWeightsAndVolatilities = async (config: TConfig) => {
     });
 };
 
-export const getDemeanedWeightsAndVols = async (
-  config: TConfig,
-  universe: string[],
-) => {
+export const getDemeanedWeightsAndVols = async (config: TConfig, universe: string[]) => {
   const weights = await getWeights();
   const volatilities = await getVolatilities();
   let totalVol = new BigNumber(0);
@@ -103,13 +90,10 @@ export const getDemeanedWeightsAndVols = async (
   //   ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"].includes(w.ticker),
   // );
 
-  const filteredWeights = weights.data.filter((w) =>
-    universe.includes(w.ticker),
-  );
+  const filteredWeights = weights.data.filter((w) => universe.includes(w.ticker));
 
   const averageMomentum =
-    filteredWeights.reduce((sum, v) => sum + v.momentum_megafactor, 0) /
-    filteredWeights.length;
+    filteredWeights.reduce((sum, v) => sum + v.momentum_megafactor, 0) / filteredWeights.length;
 
   const absSumMomentum = filteredWeights.reduce(
     (sum, v) => sum.plus(Math.abs(v.momentum_megafactor)),
@@ -117,8 +101,7 @@ export const getDemeanedWeightsAndVols = async (
   );
 
   const averageCarry =
-    filteredWeights.reduce((sum, v) => sum + v.carry_megafactor, 0) /
-    filteredWeights.length;
+    filteredWeights.reduce((sum, v) => sum + v.carry_megafactor, 0) / filteredWeights.length;
 
   const absSumCarry = filteredWeights.reduce(
     (sum, v) => sum.plus(Math.abs(v.carry_megafactor)),
@@ -127,23 +110,17 @@ export const getDemeanedWeightsAndVols = async (
 
   const merged = filteredWeights.map((w) => {
     const vol = volatilities.data.find((v) => v.ticker === w.ticker);
-    if (!vol)
-      throw new Error("Non matching ticker between weights and volatilities");
+    if (!vol) throw new Error("Non matching ticker between weights and volatilities");
 
-    if (vol.ewvol <= 0)
-      throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
+    if (vol.ewvol <= 0) throw new Error(`Vol for ${vol.ticker} must be greather than 0`);
 
     const demeanedMomo = BigNumber(w.momentum_megafactor)
       .minus(averageMomentum)
       .div(absSumMomentum);
 
-    const demeanedCarry = BigNumber(w.carry_megafactor)
-      .minus(averageCarry)
-      .div(absSumCarry);
+    const demeanedCarry = BigNumber(w.carry_megafactor).minus(averageCarry).div(absSumCarry);
 
-    const adjustedTrend = BigNumber(w.trend_megafactor)
-      .times(10)
-      .div(filteredWeights.length);
+    const adjustedTrend = BigNumber(w.trend_megafactor).times(10).div(filteredWeights.length);
 
     const inverseVol = new BigNumber(1).div(vol.ewvol);
     const comboWeight = new BigNumber(adjustedTrend)
@@ -151,9 +128,7 @@ export const getDemeanedWeightsAndVols = async (
       .plus(new BigNumber(demeanedMomo).times(config.momentum_weight))
       .plus(new BigNumber(demeanedCarry).times(config.carry_weight));
 
-    const volScaledWeight = BigNumber(
-      clamp(inverseVol.times(comboWeight).toNumber(), -0.25, 0.25),
-    );
+    const volScaledWeight = BigNumber(clamp(inverseVol.times(comboWeight).toNumber(), -0.25, 0.25));
 
     totalVol = totalVol.plus(volScaledWeight.abs());
     return {
@@ -176,9 +151,7 @@ export const getDemeanedWeightsAndVols = async (
     });
   else
     return merged.map((m) => {
-      const dollarAllocation = new BigNumber(m.vol_scaled_weight).times(
-        config.allocation,
-      );
+      const dollarAllocation = new BigNumber(m.vol_scaled_weight).times(config.allocation);
       return {
         ticker: m.ticker,
         token_allocation: dollarAllocation.div(m.arrival_price),
