@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import BN from "bignumber.js";
 import type { Database } from "../database.types";
-import { Config, Context, Effect, Layer, Predicate, Schedule, Schema } from "effect";
+import { BigDecimal, Config, Context, Effect, Layer, Predicate, Schedule, Schema } from "effect";
 import { Resource } from "sst";
 import { SUPABASE_URL } from "./constants";
 
@@ -56,74 +56,49 @@ export const computeAllocations = (
 ): Effect.Effect<WeightedTicker[], AllocationError> =>
   Effect.die("TODO: implement computeAllocations");
 
-export class TradingConfigService extends Context.Service<
-  TradingConfigService,
-  {
-    getConfig: (exchange: TExchangeNames) => Effect.Effect<TConfig, ConfigError>;
-    readonly getTickers: Effect.Effect<TTicker[], ConfigError>;
-    readonly getWeights: Effect.Effect<{ data: Weight[] }, ConfigError>;
-    readonly getVolatilities: Effect.Effect<{ data: Volatility[] }, ConfigError>;
-    readonly getWeightsAndVolatilities: (
-      config: TConfig,
-    ) => Effect.Effect<WeightedTicker[], ConfigError | AllocationError>;
-  }
->()("TradingConfigService") {
-  static readonly layer = Layer.effect(
-    TradingConfigService,
-    Effect.gen(function* () {
-      const supabase = createClient<Database>(SUPABASE_URL, Resource.SUPABASE_KEY.value);
+const ONE = BigDecimal.fromBigInt(1n);
+const WEIGHT_TOLERANCE = BigDecimal.fromStringUnsafe("0.000000001");
 
-      // TODO: Effect translations of the src/api.ts fetches (supabase reads +
-      // ROBOTWEALTH_API weights/volatilities via ky + fetchAndParse), each
-      // wrapped in Effect.try + retryPolicy, errors mapped to ConfigError.
-      const getConfig = Effect.fn("TradingConfigService.getConfig")(function* (
-        exchange: TExchangeNames,
-      ) {
-        const data = yield* Effect.tryPromise({
-          try: () => supabase.from("exchange").select().eq("exchange", exchange).single(),
-          catch: (cause) =>
-            new ConfigError({ message: `Selecting ${exchange} config failed`, cause }),
-        }).pipe(
-          Effect.map((response) => response.data),
-          Effect.filterOrFail(
-            Predicate.isNotNullish,
-            (cause) => new ConfigError({ message: `Null ${exchange} config`, cause }),
-          ),
+const supabase = createClient<Database>(SUPABASE_URL, Resource.SUPABASE_KEY.value);
+
+export const getConfig = Effect.fn("TradingConfigService.getConfig")(function* (
+  exchange: TExchangeNames,
+) {
+  const data = yield* Effect.tryPromise({
+    try: () => supabase.from("exchange").select().eq("exchange", exchange).single(),
+    catch: (cause) => new ConfigError({ message: `Selecting ${exchange} config failed`, cause }),
+  }).pipe(
+    Effect.retry(retryPolicy),
+    Effect.map((response) => response.data),
+    Effect.filterOrFail(
+      Predicate.isNotNullish,
+      (cause) => new ConfigError({ message: `Null ${exchange} config`, cause }),
+    ),
+    Effect.filterOrFail(
+      (data) => {
+        const sum = BigDecimal.sumAll([
+          BigDecimal.fromNumberUnsafe(data.trend_weight),
+          BigDecimal.fromNumberUnsafe(data.momentum_weight),
+          BigDecimal.fromNumberUnsafe(data.carry_weight),
+        ]);
+
+        return BigDecimal.isLessThanOrEqualTo(
+          BigDecimal.abs(BigDecimal.subtract(sum, ONE)),
+          WEIGHT_TOLERANCE,
         );
-      });
-
-      const getTickers = Effect.die("TODO: implement getTickers") as Effect.Effect<
-        TTicker[],
-        ConfigError
-      >;
-
-      const getWeights = Effect.die("TODO: implement getWeights") as Effect.Effect<
-        { data: Weight[] },
-        ConfigError
-      >;
-
-      const getVolatilities = Effect.die("TODO: implement getVolatilities") as Effect.Effect<
-        { data: Volatility[] },
-        ConfigError
-      >;
-
-      const getWeightsAndVolatilities = Effect.fn("TradingConfigService.getWeightsAndVolatilities")(
-        function* (config: TConfig) {
-          const weights = yield* getWeights;
-          const volatilities = yield* getVolatilities;
-          return yield* computeAllocations(weights.data, volatilities.data, config);
-        },
-      );
-
-      void supabase;
-
-      return TradingConfigService.of({
-        getConfig,
-        getTickers,
-        getWeights,
-        getVolatilities,
-        getWeightsAndVolatilities,
-      });
-    }),
+      },
+      (cause) =>
+        new ConfigError({ message: `${exchange} config weights didn't add up to 1`, cause }),
+    ),
   );
-}
+
+  return data;
+});
+
+export const getTickers = Effect.tryPromise({
+  try: () => supabase.from("ticker").select().throwOnError(),
+  catch: (cause) => new ConfigError({ message: "Getting tickers failed", cause }),
+}).pipe(
+  Effect.retry(retryPolicy),
+  Effect.map((response) => response.data),
+);
