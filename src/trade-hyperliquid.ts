@@ -19,9 +19,10 @@ import { Resource } from "sst";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "../database.types";
-import { getConfig, getTickers, getWeightsAndVolatilities } from "./api";
+import { getWeightsAndVolatilities } from "./api";
 import { SLIPPAGE } from "./constants";
 import { sendTelegramMessage } from "./util";
+import { getConfig, getTickers } from "./trading-config";
 
 class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String,
@@ -355,15 +356,10 @@ class TradingConfigService extends Context.Service<
   static readonly layer = Layer.effect(
     TradingConfigService,
     Effect.gen(function* () {
-      const getConfig_ = Effect.tryPromise({
-        try: () => getConfig("hyperliquid"),
-        catch: (cause) => new ConfigError({ message: "Retrieving config failed", cause }),
-      }).pipe(Effect.retry(promiseRetry));
-
-      const getTickers_ = Effect.tryPromise({
-        try: () => getTickers(),
-        catch: (cause) => new ConfigError({ message: "Retrieving tickers failed", cause }),
-      }).pipe(Effect.retry(promiseRetry));
+      // const getTickers_ = Effect.tryPromise({
+      //   try: () => getTickers(),
+      //   catch: (cause) => new ConfigError({ message: "Retrieving tickers failed", cause }),
+      // }).pipe(Effect.retry(promiseRetry));
 
       const getWeightsAndVolatilities_ = Effect.fn("MarketDataService.getWeightsAndVolatilities")(
         function* (config: TConfig) {
@@ -379,8 +375,8 @@ class TradingConfigService extends Context.Service<
       );
 
       return TradingConfigService.of({
-        getConfig: getConfig_,
-        getTickers: getTickers_,
+        getConfig: getConfig("hyperliquid"),
+        getTickers,
         getWeightsAndVolatilities: getWeightsAndVolatilities_,
       });
     }),
