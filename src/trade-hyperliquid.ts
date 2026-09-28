@@ -222,12 +222,12 @@ class HyperliquidService extends Context.Service<
           });
         });
 
-        const retryPolicy = Schedule.forever.pipe(
+        const limitOrderRetry = Schedule.forever.pipe(
           Schedule.addDelay(() => Effect.succeed("2000 millis")),
           Schedule.jittered,
         );
 
-        return yield* attempt.pipe(Effect.retry(retryPolicy));
+        return yield* attempt.pipe(Effect.retry(limitOrderRetry));
       });
 
       const marketOrderRebalance = Effect.fn("Hyperliquid.marketOrderRebalance")(function* ({
@@ -356,11 +356,6 @@ class TradingConfigService extends Context.Service<
   static readonly layer = Layer.effect(
     TradingConfigService,
     Effect.gen(function* () {
-      // const getTickers_ = Effect.tryPromise({
-      //   try: () => getTickers(),
-      //   catch: (cause) => new ConfigError({ message: "Retrieving tickers failed", cause }),
-      // }).pipe(Effect.retry(promiseRetry));
-
       const getWeightsAndVolatilities_ = Effect.fn("MarketDataService.getWeightsAndVolatilities")(
         function* (config: TConfig) {
           return yield* Effect.tryPromise({
@@ -375,8 +370,8 @@ class TradingConfigService extends Context.Service<
       );
 
       return TradingConfigService.of({
-        getConfig: getConfig("hyperliquid"),
-        getTickers,
+        getConfig: getConfig("hyperliquid").pipe(Effect.retry(promiseRetry)),
+        getTickers: getTickers.pipe(Effect.retry(promiseRetry)),
         getWeightsAndVolatilities: getWeightsAndVolatilities_,
       });
     }),
