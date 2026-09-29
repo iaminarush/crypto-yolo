@@ -656,7 +656,7 @@ const program = Effect.gen(function* () {
   );
 
   const message = `
-  Hyperliquid Trading Complete
+  Hyperliquid Trading Complete (effect)
 
   ${status}
   Runtime: ${minutes}m ${seconds}s
