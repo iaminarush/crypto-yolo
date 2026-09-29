@@ -5,6 +5,15 @@ allowBuilds:
   bufferutil: true
   ccxt: true
   esbuild: true
+  msgpackr-extract: true
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - better-result@3.0.0
+  - '@effect/tsgo-darwin-arm64@0.45.0'
+  - '@effect/tsgo-darwin-x64@0.45.0'
+  - '@effect/tsgo-linux-arm64@0.45.0'
+  - '@effect/tsgo-linux-arm@0.45.0'
+  - '@effect/tsgo-linux-x64@0.45.0'
+  - '@effect/tsgo-win32-arm64@0.45.0'
+  - '@effect/tsgo-win32-x64@0.45.0'
+  - '@effect/tsgo@0.45.0'
