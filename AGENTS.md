@@ -32,7 +32,8 @@ pnpm monorepo. Root package = SST-deployed trading workers (AWS Lambdas). `apps/
 
 ## Trading code
 
-- All allocation math uses `bignumber.js` (`BN`) — never raw floats for sizes/allocation.
+- All allocation math uses arbitrary-precision decimals — never raw floats for sizes/allocation. `src/trade-hyperliquid.ts` and `src/trading-config.ts` use Effect's `BigDecimal`; `trade-extended`/`trade-risex`/`api.ts` still use `bignumber.js` (`BN`). Gotcha: `BigDecimal.toString()` renders `BigDecimal(1.5)`, so use `BigDecimal.format()` for anything interpolated into user-facing text.
+- Prefer `BigDecimal` for new math. Rounding modes are string literals, not ints: `BN.ROUND_UP` (away from zero) is `"from-zero"` and `BN.ROUND_DOWN` (towards zero) is `"to-zero"`; `BigDecimal.round(n, { scale, mode })` takes decimal places as `scale`.
 - Hyperliquid integration uses `@nktkas/hyperliquid` (`HttpTransport` + `InfoClient`); docs MCP is available (nktkas/hyperliquid and hyperliquid).
 - Worker entrypoints: `src/trade-{extended,hyperliquid,risex}.handler`, orchestrated by the cron `src/timestamp-checker` → SNS error topic → `src/notifier`.
 
