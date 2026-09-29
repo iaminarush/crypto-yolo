@@ -1,64 +1,30 @@
 import { createClient } from "@supabase/supabase-js";
-import BN from "bignumber.js";
-import type { Database } from "../database.types";
+import { BigDecimal, Effect, flow, Schedule, Schema } from "effect";
 import {
-  BigDecimal,
-  Config,
-  Context,
-  Effect,
-  flow,
-  Layer,
-  pipe,
-  Predicate,
-  Schedule,
-  Schema,
-} from "effect";
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+} from "effect/unstable/http";
 import { Resource } from "sst";
+import type { Database } from "../database.types";
 import { ROBOTWEALTH_API, SUPABASE_URL } from "./constants";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String,
   cause: Schema.Defect(),
 }) {}
 
-class AllocationError extends Schema.TaggedError<AllocationError>()("AllocationError", {
-  message: Schema.String,
-  cause: Schema.Defect(),
-}) {}
-
 type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
-type TTicker = Database["public"]["Tables"]["ticker"]["Row"];
 type TExchangeNames = "extended" | "hyperliquid" | "risex";
-
-export type Weight = {
-  ticker: string;
-  arrival_price: number;
-  carry_megafactor: number;
-  combo_weight: number;
-  momentum_megafactor: number;
-  trend_megafactor: number;
-};
-
-export type Volatility = {
-  ticker: string;
-  ewvol: number;
-  date: string;
-};
-
-export type WeightedTicker = {
-  ticker: string;
-  token_allocation: BN;
-};
 
 const ONE = BigDecimal.fromBigInt(1n);
 const WEIGHT_TOLERANCE = BigDecimal.fromStringUnsafe("0.000000001");
+const dec = BigDecimal.fromNumberUnsafe;
 
 const supabase = createClient<Database>(SUPABASE_URL, Resource.SUPABASE_KEY.value);
 
-export const getConfig = Effect.fn("TradingConfigService.getConfig")(function* (
-  exchange: TExchangeNames,
-) {
+export const getConfig = Effect.fn("TradingConfig.getConfig")(function* (exchange: TExchangeNames) {
   const data = yield* Effect.tryPromise({
     try: () => supabase.from("exchange").select().eq("exchange", exchange).single().throwOnError(),
     catch: (cause) => new ConfigError({ message: `Selecting ${exchange} config failed`, cause }),
@@ -67,9 +33,9 @@ export const getConfig = Effect.fn("TradingConfigService.getConfig")(function* (
     Effect.filterOrFail(
       (data) => {
         const sum = BigDecimal.sumAll([
-          BigDecimal.fromNumberUnsafe(data.trend_weight),
-          BigDecimal.fromNumberUnsafe(data.momentum_weight),
-          BigDecimal.fromNumberUnsafe(data.carry_weight),
+          dec(data.trend_weight),
+          dec(data.momentum_weight),
+          dec(data.carry_weight),
         ]);
 
         return BigDecimal.isLessThanOrEqualTo(
@@ -111,7 +77,7 @@ const Positive = Schema.Finite.check(Schema.isGreaterThan(0));
 
 const Weight = Schema.Struct({
   ticker: Schema.String,
-  arrival_price: Schema.Finite,
+  arrival_price: Positive,
   carry_megafactor: Schema.Finite,
   combo_weight: Schema.Finite,
   momentum_megafactor: Schema.Finite,
@@ -124,7 +90,7 @@ const WeightsSchema = Schema.Struct({
   data: Schema.NonEmptyArray(Weight),
 });
 
-const getWeights = Effect.fn("TradingConfigService.getWeights")(function* () {
+const getWeights = Effect.fn("TradingConfig.getWeights")(function* () {
   const client = yield* robotWealthClient;
 
   return yield* client.get("/weights").pipe(
@@ -149,7 +115,7 @@ const VolSchema = Schema.Struct({
   success: Schema.Literal(true),
 });
 
-const getVolatilities = Effect.fn("TradingConfigService.getVolatilities")(function* () {
+const getVolatilities = Effect.fn("TradingConfig.getVolatilities")(function* () {
   const client = yield* robotWealthClient;
 
   return yield* client.get("/volatilities").pipe(
@@ -162,20 +128,53 @@ const getVolatilities = Effect.fn("TradingConfigService.getVolatilities")(functi
   );
 });
 
-const getVolScaledWeights = Effect.fn("TradingConfigService.getWeightsAndVolatilities")(
-  function* () {
-    const weights = yield* getWeights();
-    const volatilities = yield* getVolatilities();
-    let totalVol = BigDecimal.fromBigInt(0n);
-    const volByTicker = new Map(volatilities.data.map((v) => [v.ticker, v]));
-    const dec = BigDecimal.fromNumberUnsafe;
+const clampWeight = BigDecimal.clamp({
+  minimum: BigDecimal.fromStringUnsafe("-0.25"),
+  maximum: BigDecimal.fromStringUnsafe("0.25"),
+});
 
-    const merged = yield* Effect.forEach(weights, (w) =>
-      Effect.gen(function* () {
-        const vol = volByTicker.get(w.ticker);
-        if (vol === undefined)
-          return yield* new ConfigError({ message: `No volatility for ${w.ticker}`, cause: w });
-      }),
-    );
-  },
-);
+export type WeightedTicker = Effect.Success<ReturnType<typeof getVolScaledWeights>>[number];
+
+export const getVolScaledWeights = Effect.fn("TradingConfig.getVolScaledWeights")(function* (
+  config: TConfig,
+) {
+  const { weights, volatilities } = yield* Effect.all(
+    {
+      weights: getWeights(),
+      volatilities: getVolatilities(),
+    },
+    { concurrency: "unbounded" },
+  );
+  const volByTicker = new Map(volatilities.data.map((v) => [v.ticker, v]));
+
+  const merged = yield* Effect.forEach(weights.data, (w) =>
+    Effect.gen(function* () {
+      const vol = volByTicker.get(w.ticker);
+      if (vol === undefined)
+        return yield* new ConfigError({ message: `No volatility for ${w.ticker}`, cause: w });
+      const inverseVol = BigDecimal.divideUnsafe(ONE, dec(vol.ewvol));
+
+      const comboWeight = BigDecimal.sumAll([
+        BigDecimal.multiply(dec(w.trend_megafactor), dec(config.trend_weight)),
+        BigDecimal.multiply(dec(w.momentum_megafactor), dec(config.momentum_weight)),
+        BigDecimal.multiply(dec(w.carry_megafactor), dec(config.carry_weight)),
+      ]);
+      return {
+        ticker: w.ticker,
+        arrivalPrice: dec(w.arrival_price),
+        volScaledWeight: clampWeight(BigDecimal.multiply(inverseVol, comboWeight)),
+      };
+    }),
+  );
+
+  const totalVol = BigDecimal.sumAll(merged.map((m) => BigDecimal.abs(m.volScaledWeight)));
+  const denominator = BigDecimal.isGreaterThan(totalVol, ONE) ? totalVol : ONE;
+
+  return merged.map((m) => {
+    const volScaledWeight = BigDecimal.divideUnsafe(m.volScaledWeight, denominator);
+    const dollarAllocation = BigDecimal.multiply(volScaledWeight, dec(config.allocation));
+    const tokenAllocation = BigDecimal.divideUnsafe(dollarAllocation, m.arrivalPrice);
+
+    return { ticker: m.ticker, token_allocation: tokenAllocation };
+  });
+}, Effect.provide(FetchHttpClient.layer));
