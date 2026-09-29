@@ -13,16 +13,24 @@ import {
 } from "@nktkas/hyperliquid";
 import { formatPrice, SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type { Handler } from "aws-lambda";
-import BN from "bignumber.js";
-import { Cause, Clock, Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
+import {
+  BigDecimal,
+  Cause,
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Schedule,
+  Schema,
+} from "effect";
 import { Resource } from "sst";
 import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "../database.types";
-import { getWeightsAndVolatilities } from "./api";
 import { SLIPPAGE } from "./constants";
 import { sendTelegramMessage } from "./util";
-import { getConfig, getTickers } from "./trading-config";
+import { getConfig, getTickers, getVolScaledWeights, WeightedTicker } from "./trading-config";
 
 class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String,
@@ -52,7 +60,10 @@ class TelegramError extends Schema.TaggedError<TelegramError>()("TelegramError",
 
 const SLEEP_MS = 2250;
 const MAX_RUNTIME_MS = 10 * 60 * 1000;
-const MINIMUM_ORDER_VALUE = BN(10);
+const ZERO = BigDecimal.fromBigInt(0n);
+const ONE = BigDecimal.fromBigInt(1n);
+const dec = BigDecimal.fromNumberUnsafe;
+const MINIMUM_ORDER_VALUE = dec(10);
 
 const promiseRetry = Schedule.exponential("200 millis").pipe(
   Schedule.jittered,
@@ -79,7 +90,7 @@ class HyperliquidService extends Context.Service<
 
     createLimitOrder(args: {
       ticker: string;
-      size: BN;
+      size: BigDecimal.BigDecimal;
       side: "BUY" | "SELL";
     }): Effect.Effect<
       OrderSuccessResponse | { status: "skipped"; reason: string },
@@ -176,7 +187,7 @@ class HyperliquidService extends Context.Service<
         side,
       }: {
         ticker: string;
-        size: BN;
+        size: BigDecimal.BigDecimal;
         side: "BUY" | "SELL";
       }) {
         const isBuy = side === "BUY";
@@ -207,7 +218,7 @@ class HyperliquidService extends Context.Service<
                     a: assetId,
                     b: isBuy,
                     p: formatPrice(price, szDecimals),
-                    s: size.toNumber(),
+                    s: BigDecimal.toNumberUnsafe(size),
                     r: false,
                     t: { limit: { tif: "Alo" } },
                   },
@@ -248,10 +259,11 @@ class HyperliquidService extends Context.Service<
             const currentPosition = currentPositions.find((p) => p.position.coin === ticker);
             const { size, side } = calculateOrderSize(
               desiredPosition,
-              BN(currentPosition ? currentPosition.position.szi : 0),
+              BigDecimal.fromStringUnsafe(currentPosition ? currentPosition.position.szi : "0"),
               mids,
             );
-            if (!size.gt(0)) return { ticker, status: "skipped" as const };
+            if (!BigDecimal.isGreaterThan(size, ZERO))
+              return { ticker, status: "skipped" as const };
             const mid = mids[ticker];
             const price = parseFloat(mid) * (1 + (side === "BUY" ? SLIPPAGE : -SLIPPAGE));
             const response = yield* Effect.tryPromise({
@@ -262,7 +274,7 @@ class HyperliquidService extends Context.Service<
                       a: converter.getAssetId(ticker) || "",
                       b: side === "BUY",
                       p: formatPrice(price, converter.getSzDecimals(ticker) || 0),
-                      s: size.toNumber(),
+                      s: BigDecimal.toNumberUnsafe(size),
                       r: false,
                       t: { limit: { tif: "Ioc" } },
                     },
@@ -338,41 +350,22 @@ class TelegramService extends Context.Service<
 type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
 type TTicker = Database["public"]["Tables"]["ticker"]["Row"];
 
-export type WeightedTicker = {
-  ticker: string;
-  token_allocation: BN;
-};
-
 class TradingConfigService extends Context.Service<
   TradingConfigService,
   {
     readonly getConfig: Effect.Effect<TConfig, ConfigError>;
     readonly getTickers: Effect.Effect<TTicker[], ConfigError>;
-    readonly getWeightsAndVolatilities: (
-      config: TConfig,
-    ) => Effect.Effect<WeightedTicker[], ConfigError>;
+    readonly getVolScaledWeights: (config: TConfig) => Effect.Effect<WeightedTicker[], ConfigError>;
   }
 >()("Hyperliquid/MarketDataService") {
   static readonly layer = Layer.effect(
     TradingConfigService,
     Effect.gen(function* () {
-      const getWeightsAndVolatilities_ = Effect.fn("MarketDataService.getWeightsAndVolatilities")(
-        function* (config: TConfig) {
-          return yield* Effect.tryPromise({
-            try: () => getWeightsAndVolatilities(config),
-            catch: (cause) =>
-              new ConfigError({
-                message: "Retrieving weights and vols failed",
-                cause,
-              }),
-          });
-        },
-      );
-
       return TradingConfigService.of({
         getConfig: getConfig("hyperliquid").pipe(Effect.retry(promiseRetry)),
         getTickers: getTickers.pipe(Effect.retry(promiseRetry)),
-        getWeightsAndVolatilities: getWeightsAndVolatilities_,
+        getVolScaledWeights: (config) =>
+          getVolScaledWeights(config).pipe(Effect.retry(promiseRetry)),
       });
     }),
   );
@@ -403,7 +396,9 @@ const calculateDesiredPositions = Effect.fn(function* (
 
       const tokenAllocation = vw.token_allocation;
 
-      const isPositive = tokenAllocation.gte(0);
+      const isPositive = BigDecimal.isGreaterThanOrEqualTo(tokenAllocation, ZERO);
+      const signedBuffer = dec(isPositive ? config.trade_buffer : -config.trade_buffer);
+      const oppositeBuffer = dec(isPositive ? -config.trade_buffer : config.trade_buffer);
 
       const market = markets.find((m) => m.name === exchangeTicker);
 
@@ -411,13 +406,9 @@ const calculateDesiredPositions = Effect.fn(function* (
         rwTicker: vw.ticker,
         exchangeTicker,
         desiredSize: tokenAllocation,
-        upperBound: tokenAllocation.times(
-          BN(isPositive ? config.trade_buffer : -config.trade_buffer).plus(1),
-        ),
-        lowerBound: tokenAllocation.times(
-          BN(isPositive ? -config.trade_buffer : config.trade_buffer).plus(1),
-        ),
-        minOrderSizeChange: market ? getMinOrderSizeChange(market.szDecimals) : BN(0),
+        upperBound: BigDecimal.multiply(tokenAllocation, BigDecimal.sum(signedBuffer, ONE)),
+        lowerBound: BigDecimal.multiply(tokenAllocation, BigDecimal.sum(oppositeBuffer, ONE)),
+        minOrderSizeChange: market ? getMinOrderSizeChange(market.szDecimals) : ZERO,
         szDecimals: market ? market.szDecimals : 1,
       };
     }),
@@ -428,7 +419,9 @@ const filterTickersToRebalance = (
   desiredPositions: readonly TDesiredPosition[],
   currentPositions: ClearinghouseStateResponse["assetPositions"],
 ) => {
-  const positionMap = new Map(currentPositions.map((p) => [p.position.coin, BN(p.position.szi)]));
+  const positionMap = new Map(
+    currentPositions.map((p) => [p.position.coin, BigDecimal.fromStringUnsafe(p.position.szi)]),
+  );
 
   const result = new Map<string, TDesiredPosition>();
 
@@ -440,7 +433,10 @@ const filterTickersToRebalance = (
       continue;
     }
 
-    if (currentSize.gte(dp.lowerBound) && currentSize.lte(dp.upperBound)) {
+    if (
+      BigDecimal.isGreaterThanOrEqualTo(currentSize, dp.lowerBound) &&
+      BigDecimal.isLessThanOrEqualTo(currentSize, dp.upperBound)
+    ) {
       continue;
     }
 
@@ -451,59 +447,70 @@ const filterTickersToRebalance = (
 
 function calculateOrderSize(
   desiredPosition: TDesiredPosition,
-  currentPosition: BN,
+  currentPosition: BigDecimal.BigDecimal,
   allMids: AllMidsResponse,
-): { size: BN; side: "BUY" | "SELL" } {
+): { size: BigDecimal.BigDecimal; side: "BUY" | "SELL" } {
   const { szDecimals, lowerBound, upperBound } = desiredPosition;
   const midPrice = allMids[desiredPosition.exchangeTicker];
-  const minOrdersize = MINIMUM_ORDER_VALUE.div(midPrice).decimalPlaces(szDecimals, BN.ROUND_UP);
+  const minOrdersize = BigDecimal.round(
+    BigDecimal.divideUnsafe(MINIMUM_ORDER_VALUE, BigDecimal.fromStringUnsafe(midPrice)),
+    { scale: szDecimals, mode: "from-zero" },
+  );
 
-  if (currentPosition.gte(lowerBound) && currentPosition.lte(upperBound)) {
-    return { size: BN(0), side: "BUY" };
+  if (
+    BigDecimal.isGreaterThanOrEqualTo(currentPosition, lowerBound) &&
+    BigDecimal.isLessThanOrEqualTo(currentPosition, upperBound)
+  ) {
+    return { size: ZERO, side: "BUY" };
   }
-  if (currentPosition.lt(lowerBound)) {
-    const gap = lowerBound.minus(currentPosition);
+  if (BigDecimal.isLessThan(currentPosition, lowerBound)) {
+    const gap = BigDecimal.subtract(lowerBound, currentPosition);
 
-    const size = gap.lt(minOrdersize) ? minOrdersize : gap;
+    const size = BigDecimal.isLessThan(gap, minOrdersize) ? minOrdersize : gap;
 
-    const roundedUp = roundToDecimal(size, szDecimals, BN.ROUND_UP);
-    const roundedDown = roundToDecimal(size, szDecimals, BN.ROUND_DOWN);
+    const roundedUp = roundToDecimal(size, szDecimals, "from-zero");
+    const roundedDown = roundToDecimal(size, szDecimals, "to-zero");
 
-    if (currentPosition.plus(roundedUp).lt(desiredPosition.upperBound))
+    if (BigDecimal.isLessThan(BigDecimal.sum(currentPosition, roundedUp), upperBound))
       return { size: roundedUp, side: "BUY" };
 
-    if (currentPosition.plus(roundedDown).lt(desiredPosition.upperBound))
+    if (BigDecimal.isLessThan(BigDecimal.sum(currentPosition, roundedDown), upperBound))
       return { size: roundedDown, side: "BUY" };
 
-    return { size: BN(0), side: "BUY" };
+    return { size: ZERO, side: "BUY" };
   }
 
-  if (currentPosition.gt(desiredPosition.upperBound)) {
-    const gap = desiredPosition.upperBound.minus(currentPosition).absoluteValue();
+  if (BigDecimal.isGreaterThan(currentPosition, upperBound)) {
+    const gap = BigDecimal.abs(BigDecimal.subtract(upperBound, currentPosition));
 
-    const size = gap.lt(minOrdersize) ? minOrdersize : gap;
+    const size = BigDecimal.isLessThan(gap, minOrdersize) ? minOrdersize : gap;
 
-    const roundedUp = roundToDecimal(size, szDecimals, BN.ROUND_UP);
-    const roundedDown = roundToDecimal(size, szDecimals, BN.ROUND_DOWN);
+    const roundedUp = roundToDecimal(size, szDecimals, "from-zero");
+    const roundedDown = roundToDecimal(size, szDecimals, "to-zero");
 
-    if (currentPosition.plus(roundedUp).gt(desiredPosition.lowerBound))
+    if (BigDecimal.isGreaterThan(BigDecimal.sum(currentPosition, roundedUp), lowerBound))
       return { size: roundedUp, side: "SELL" };
 
-    if (currentPosition.plus(roundedDown).gt(desiredPosition.lowerBound))
+    if (BigDecimal.isGreaterThan(BigDecimal.sum(currentPosition, roundedDown), lowerBound))
       return { size: roundedDown, side: "SELL" };
 
-    return { size: BN(0), side: "SELL" };
+    return { size: ZERO, side: "SELL" };
   }
 
-  return { size: BN(0), side: "BUY" };
+  return { size: ZERO, side: "BUY" };
 }
 
-function getMinOrderSizeChange(szDecimals: number): BN {
-  return new BN(1).dividedBy(new BN(10).pow(szDecimals));
+/** Exact 10^-szDecimals, i.e. the smallest size step the venue accepts. */
+function getMinOrderSizeChange(szDecimals: number): BigDecimal.BigDecimal {
+  return BigDecimal.make(1n, szDecimals);
 }
 
-function roundToDecimal(value: BN, szDecimals: number, roundingMode?: BN.RoundingMode) {
-  return value.decimalPlaces(szDecimals, roundingMode);
+function roundToDecimal(
+  value: BigDecimal.BigDecimal,
+  szDecimals: number,
+  roundingMode: BigDecimal.RoundingMode = "half-from-zero",
+) {
+  return BigDecimal.round(value, { scale: szDecimals, mode: roundingMode });
 }
 
 const AppLayer = Layer.mergeAll(
@@ -519,7 +526,7 @@ const program = Effect.gen(function* () {
   const telegram = yield* TelegramService;
 
   const config = yield* tradingConfig.getConfig;
-  const volAndWeight = yield* tradingConfig.getWeightsAndVolatilities(config);
+  const volAndWeight = yield* tradingConfig.getVolScaledWeights(config);
   const tickers = yield* tradingConfig.getTickers;
   const { assetPositions } = yield* hl.clearinghouseState;
   const meta = yield* hl.meta;
@@ -545,11 +552,11 @@ const program = Effect.gen(function* () {
         const currentPosition = updatedPositions.find((p) => p.position.coin === ticker);
         const { size, side } = calculateOrderSize(
           desiredPosition,
-          BN(currentPosition ? currentPosition.position.szi : 0),
+          BigDecimal.fromStringUnsafe(currentPosition ? currentPosition.position.szi : "0"),
           allMids,
         );
 
-        if (size.gt(0)) {
+        if (BigDecimal.isGreaterThan(size, ZERO)) {
           yield* hl.createLimitOrder({ ticker, size, side });
         } else {
           tickersToRebalance.delete(ticker);
@@ -558,7 +565,14 @@ const program = Effect.gen(function* () {
         const book = yield* hl.l2Book(ticker);
         const bestPrice = book?.levels[order.side === "B" ? 0 : 1]?.[0]?.px;
 
-        if (bestPrice && BN(order.limitPx).eq(bestPrice)) continue;
+        if (
+          bestPrice &&
+          BigDecimal.equals(
+            BigDecimal.fromStringUnsafe(order.limitPx),
+            BigDecimal.fromStringUnsafe(bestPrice),
+          )
+        )
+          continue;
 
         yield* hl.cancelOrders([order]);
 
@@ -566,11 +580,11 @@ const program = Effect.gen(function* () {
 
         const { size, side } = calculateOrderSize(
           desiredPosition,
-          currentPosition ? BN(currentPosition.position.szi) : BN(0),
+          currentPosition ? BigDecimal.fromStringUnsafe(currentPosition.position.szi) : ZERO,
           allMids,
         );
 
-        if (size.gt(0)) {
+        if (BigDecimal.isGreaterThan(size, ZERO)) {
           yield* hl.createLimitOrder({
             ticker,
             size,
@@ -603,13 +617,15 @@ const program = Effect.gen(function* () {
   ).map((fr) => {
     const position = finalPositions.find((fp) => fp.position.coin === fr.exchangeTicker)?.position;
 
-    const size = BN(position?.szi || 0);
+    const size = BigDecimal.fromStringUnsafe(position?.szi || "0");
     const midPrice = mids[fr.exchangeTicker];
 
-    const gapToLower = size.minus(fr.lowerBound).abs();
-    const gapToUpper = fr.upperBound.minus(size).abs();
-    const gap = gapToLower.lt(gapToUpper) ? gapToLower : gapToUpper;
-    const priceGap = gap.times(midPrice).toNumber();
+    const gapToLower = BigDecimal.abs(BigDecimal.subtract(size, fr.lowerBound));
+    const gapToUpper = BigDecimal.abs(BigDecimal.subtract(fr.upperBound, size));
+    const gap = BigDecimal.isLessThan(gapToLower, gapToUpper) ? gapToLower : gapToUpper;
+    const priceGap = BigDecimal.toNumberUnsafe(
+      BigDecimal.multiply(gap, BigDecimal.fromStringUnsafe(midPrice)),
+    );
 
     return { ...fr, size, priceGap };
   });
@@ -630,10 +646,14 @@ const program = Effect.gen(function* () {
       ? tickersOutOfBuffer.map((t) => `${t.rwTicker} $${t.priceGap.toFixed(2)}`).join(", ")
       : "None";
   const { balances } = yield* hl.spotClearinghouseState;
-  const usdcTotal = balances.find((b) => b.coin === "USDC")?.total || 1;
-  const leverage = BN(crossMarginSummary.totalNtlPos)
-    .dividedBy(usdcTotal)
-    .decimalPlaces(2, BN.ROUND_HALF_UP);
+  const usdcTotal = balances.find((b) => b.coin === "USDC")?.total || "1";
+  const leverage = BigDecimal.round(
+    BigDecimal.divideUnsafe(
+      BigDecimal.fromStringUnsafe(crossMarginSummary.totalNtlPos),
+      BigDecimal.fromStringUnsafe(usdcTotal),
+    ),
+    { scale: 2, mode: "half-from-zero" },
+  );
 
   const message = `
   Hyperliquid Trading Complete
@@ -642,7 +662,7 @@ const program = Effect.gen(function* () {
   Runtime: ${minutes}m ${seconds}s
   Market Order list: ${marketedList}
   Positions Out of Bounds: ${outOfBoundsList}
-  Leverage: ${leverage}`;
+  Leverage: ${BigDecimal.format(leverage)}`;
 
   yield* telegram.send(message);
 
