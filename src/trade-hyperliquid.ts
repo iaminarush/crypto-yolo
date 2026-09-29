@@ -525,6 +525,8 @@ const program = Effect.gen(function* () {
   const tradingConfig = yield* TradingConfigService;
   const telegram = yield* TelegramService;
 
+  yield* telegram.send("Hyperliquid Lambda Started");
+
   const config = yield* tradingConfig.getConfig;
   const volAndWeight = yield* tradingConfig.getVolScaledWeights(config);
   const tickers = yield* tradingConfig.getTickers;
