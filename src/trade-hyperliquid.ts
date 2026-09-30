@@ -29,13 +29,8 @@ import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "../database.types";
 import { SLIPPAGE } from "./constants";
+import { TradingConfigService, WeightedTicker } from "./trading-config";
 import { sendTelegramMessage } from "./util";
-import { getConfig, getTickers, getVolScaledWeights, WeightedTicker } from "./trading-config";
-
-class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
-  message: Schema.String,
-  cause: Schema.Defect(),
-}) {}
 
 class TickerMappingError extends Schema.TaggedError<TickerMappingError>()("TickerMappingError", {
   ticker: Schema.String,
@@ -73,11 +68,6 @@ const promiseRetry = Schedule.exponential("200 millis").pipe(
 class HyperliquidService extends Context.Service<
   HyperliquidService,
   {
-    readonly wallet: Hex;
-    readonly converter: SymbolConverter;
-    readonly client: InfoClient;
-    readonly exchange: ExchangeClient;
-
     readonly clearinghouseState: Effect.Effect<ClearinghouseStateResponse, HyperliquidError>;
     readonly spotClearinghouseState: Effect.Effect<
       SpotClearinghouseStateResponse,
@@ -309,10 +299,6 @@ class HyperliquidService extends Context.Service<
       });
 
       return HyperliquidService.of({
-        wallet: WALLET,
-        converter,
-        client,
-        exchange,
         clearinghouseState,
         spotClearinghouseState,
         meta,
@@ -349,27 +335,6 @@ class TelegramService extends Context.Service<
 
 type TConfig = Database["public"]["Tables"]["exchange"]["Row"];
 type TTicker = Database["public"]["Tables"]["ticker"]["Row"];
-
-class TradingConfigService extends Context.Service<
-  TradingConfigService,
-  {
-    readonly getConfig: Effect.Effect<TConfig, ConfigError>;
-    readonly getTickers: Effect.Effect<TTicker[], ConfigError>;
-    readonly getVolScaledWeights: (config: TConfig) => Effect.Effect<WeightedTicker[], ConfigError>;
-  }
->()("Hyperliquid/MarketDataService") {
-  static readonly layer = Layer.effect(
-    TradingConfigService,
-    Effect.gen(function* () {
-      return TradingConfigService.of({
-        getConfig: getConfig("hyperliquid").pipe(Effect.retry(promiseRetry)),
-        getTickers: getTickers.pipe(Effect.retry(promiseRetry)),
-        getVolScaledWeights: (config) =>
-          getVolScaledWeights(config).pipe(Effect.retry(promiseRetry)),
-      });
-    }),
-  );
-}
 
 type TDesiredPosition = Effect.Success<ReturnType<typeof calculateDesiredPositions>>[number];
 
@@ -527,7 +492,7 @@ const program = Effect.gen(function* () {
 
   yield* telegram.send("Hyperliquid Lambda Started");
 
-  const config = yield* tradingConfig.getConfig;
+  const config = yield* tradingConfig.getConfig("hyperliquid");
   const volAndWeight = yield* tradingConfig.getVolScaledWeights(config);
   const tickers = yield* tradingConfig.getTickers;
   const { assetPositions } = yield* hl.clearinghouseState;
@@ -658,7 +623,7 @@ const program = Effect.gen(function* () {
   );
 
   const message = `
-  Hyperliquid Trading Complete (effect)
+  Hyperliquid Trading Complete
 
   ${status}
   Runtime: ${minutes}m ${seconds}s

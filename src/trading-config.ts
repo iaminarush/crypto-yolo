@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { BigDecimal, Effect, flow, Schedule, Schema } from "effect";
+import { BigDecimal, Context, Effect, flow, Layer, Schedule, Schema } from "effect";
 import {
   FetchHttpClient,
   HttpClient,
@@ -22,9 +22,14 @@ const ONE = BigDecimal.fromBigInt(1n);
 const WEIGHT_TOLERANCE = BigDecimal.fromStringUnsafe("0.000000001");
 const dec = BigDecimal.fromNumberUnsafe;
 
+const promiseRetry = Schedule.exponential("200 millis").pipe(
+  Schedule.jittered,
+  Schedule.upTo({ times: 4 }),
+);
+
 const supabase = createClient<Database>(SUPABASE_URL, Resource.SUPABASE_KEY.value);
 
-export const getConfig = Effect.fn("TradingConfig.getConfig")(function* (exchange: TExchangeNames) {
+const getConfig = Effect.fn("TradingConfig.getConfig")(function* (exchange: TExchangeNames) {
   const data = yield* Effect.tryPromise({
     try: () => supabase.from("exchange").select().eq("exchange", exchange).single().throwOnError(),
     catch: (cause) => new ConfigError({ message: `Selecting ${exchange} config failed`, cause }),
@@ -51,7 +56,7 @@ export const getConfig = Effect.fn("TradingConfig.getConfig")(function* (exchang
   return data;
 });
 
-export const getTickers = Effect.tryPromise({
+const getTickers = Effect.tryPromise({
   try: () => supabase.from("ticker").select().throwOnError(),
   catch: (cause) => new ConfigError({ message: "Getting tickers failed", cause }),
 }).pipe(Effect.map((response) => response.data));
@@ -135,7 +140,7 @@ const clampWeight = BigDecimal.clamp({
 
 export type WeightedTicker = Effect.Success<ReturnType<typeof getVolScaledWeights>>[number];
 
-export const getVolScaledWeights = Effect.fn("TradingConfig.getVolScaledWeights")(function* (
+const getVolScaledWeights = Effect.fn("TradingConfig.getVolScaledWeights")(function* (
   config: TConfig,
 ) {
   const { weights, volatilities } = yield* Effect.all(
@@ -178,3 +183,23 @@ export const getVolScaledWeights = Effect.fn("TradingConfig.getVolScaledWeights"
     return { ticker: m.ticker, token_allocation: tokenAllocation };
   });
 }, Effect.provide(FetchHttpClient.layer));
+
+type TTicker = Database["public"]["Tables"]["ticker"]["Row"];
+
+export class TradingConfigService extends Context.Service<
+  TradingConfigService,
+  {
+    readonly getConfig: (exchange: TExchangeNames) => Effect.Effect<TConfig, ConfigError>;
+    readonly getTickers: Effect.Effect<TTicker[], ConfigError>;
+    readonly getVolScaledWeights: (config: TConfig) => Effect.Effect<WeightedTicker[], ConfigError>;
+  }
+>()("TradingConfigService") {
+  static readonly layer = Layer.succeed(
+    TradingConfigService,
+    TradingConfigService.of({
+      getConfig: (exchangeName) => getConfig(exchangeName).pipe(Effect.retry(promiseRetry)),
+      getTickers: getTickers.pipe(Effect.retry(promiseRetry)),
+      getVolScaledWeights: (config) => getVolScaledWeights(config).pipe(Effect.retry(promiseRetry)),
+    }),
+  );
+}
