@@ -203,3 +203,28 @@ export class TradingConfigService extends Context.Service<
     }),
   );
 }
+
+class TelegramError extends Schema.TaggedError<TelegramError>()("TelegramError", {
+  message: Schema.String,
+  cause: Schema.Defect(),
+}) {}
+
+class TelegramService extends Context.Service<
+  TelegramService,
+  {
+    send(message: string): Effect.Effect<void, TelegramError>;
+  }
+>()("crypto-yolo/TelegramService") {
+  static readonly layer = Layer.effect(
+    TelegramService,
+    Effect.gen(function* () {
+      const send = Effect.fn("TelegramService.send")(function* (message: string) {
+        yield* Effect.tryPromise({
+          try: () => sendTelegramMessage(message),
+          catch: (cause) => new TelegramError({ message: "Telegram send failed", cause }),
+        });
+      });
+      return TelegramService.of({ send });
+    }),
+  );
+}
