@@ -4,3 +4,4 @@ export const EXTENDED_VAULT_ID = "110816";
 export const SUPABASE_URL = "https://lapkwtulywsjfjogngcx.supabase.co";
 export const TIMESTAMP_ID = 1;
 export const SLIPPAGE = 0.005;
+export const TELEGRAM_API = "https://api.telegram.org";
