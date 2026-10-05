@@ -189,18 +189,6 @@ const getVolScaledWeights = Effect.fn("TradingConfig.getVolScaledWeights")(funct
 
 export type TWeight = Effect.Success<ReturnType<typeof getWeights>>["data"][number];
 
-/**
- * Same inverse-volatility allocation as {@link getVolScaledWeights}, except the
- * signal is cross-sectionally demeaned over `universe` only:
- *
- * - momentum/carry megafactors have the universe mean subtracted and are divided
- *   by their absolute sums, so they become mean-relative rather than raw;
- * - the trend megafactor is scaled up by `10 / N`, because raw megafactors are
- *   an order of magnitude smaller than the demeaned factors.
- *
- * Returns an empty-safe list: it fails with a {@link ConfigError} when the
- * universe matches no weights or when the demeaned denominators collapse to zero.
- */
 const getDemeanedVolScaledWeights = Effect.fn("TradingConfig.getDemeanedVolScaledWeights")(
   function* (config: TConfig, universe: Iterable<string>) {
     const { weights, volatilities } = yield* Effect.all(
@@ -237,39 +225,42 @@ const getDemeanedVolScaledWeights = Effect.fn("TradingConfig.getDemeanedVolScale
 
     const volByTicker = new Map(volatilities.data.map((v) => [v.ticker, v]));
 
-    const merged = yield* Effect.forEach(filteredWeights, (w) =>
-      Effect.gen(function* () {
-        const vol = volByTicker.get(w.ticker);
-        if (vol === undefined)
-          return yield* new ConfigError({ message: `No volatility for ${w.ticker}`, cause: w });
+    const missingVol = filteredWeights.filter((w) => !volByTicker.has(w.ticker));
+    if (missingVol.length > 0)
+      return yield* new ConfigError({
+        message: `No volatility for ${missingVol.map((w) => w.ticker).join(", ")}`,
+        cause: missingVol,
+      });
 
-        const demeanedMomentum = BigDecimal.divideUnsafe(
-          BigDecimal.subtract(dec(w.momentum_megafactor), averageMomentum),
-          absSumMomentum,
-        );
-        const demeanedCarry = BigDecimal.divideUnsafe(
-          BigDecimal.subtract(dec(w.carry_megafactor), averageCarry),
-          absSumCarry,
-        );
-        const adjustedTrend = BigDecimal.divideUnsafe(
-          BigDecimal.multiply(dec(w.trend_megafactor), dec(TREND_SCALE)),
-          count,
-        );
-        const inverseVol = BigDecimal.divideUnsafe(ONE, dec(vol.ewvol));
+    const merged = filteredWeights.map((w) => {
+      const vol = volByTicker.get(w.ticker)!;
 
-        const comboWeight = BigDecimal.sumAll([
-          BigDecimal.multiply(adjustedTrend, dec(config.trend_weight)),
-          BigDecimal.multiply(demeanedMomentum, dec(config.momentum_weight)),
-          BigDecimal.multiply(demeanedCarry, dec(config.carry_weight)),
-        ]);
+      const demeanedMomentum = BigDecimal.divideUnsafe(
+        BigDecimal.subtract(dec(w.momentum_megafactor), averageMomentum),
+        absSumMomentum,
+      );
+      const demeanedCarry = BigDecimal.divideUnsafe(
+        BigDecimal.subtract(dec(w.carry_megafactor), averageCarry),
+        absSumCarry,
+      );
+      const adjustedTrend = BigDecimal.divideUnsafe(
+        BigDecimal.multiply(dec(w.trend_megafactor), dec(TREND_SCALE)),
+        count,
+      );
+      const inverseVol = BigDecimal.divideUnsafe(ONE, dec(vol.ewvol));
 
-        return {
-          ticker: w.ticker,
-          arrivalPrice: dec(w.arrival_price),
-          volScaledWeight: clampWeight(BigDecimal.multiply(inverseVol, comboWeight)),
-        };
-      }),
-    );
+      const comboWeight = BigDecimal.sumAll([
+        BigDecimal.multiply(adjustedTrend, dec(config.trend_weight)),
+        BigDecimal.multiply(demeanedMomentum, dec(config.momentum_weight)),
+        BigDecimal.multiply(demeanedCarry, dec(config.carry_weight)),
+      ]);
+
+      return {
+        ticker: w.ticker,
+        arrivalPrice: dec(w.arrival_price),
+        volScaledWeight: clampWeight(BigDecimal.multiply(inverseVol, comboWeight)),
+      };
+    });
 
     const totalVol = BigDecimal.sumAll(merged.map((m) => BigDecimal.abs(m.volScaledWeight)));
     const denominator = BigDecimal.isGreaterThan(totalVol, ONE) ? totalVol : ONE;
