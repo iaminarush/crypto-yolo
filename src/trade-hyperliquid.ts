@@ -29,7 +29,7 @@ import type { Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Database } from "../database.types";
 import { SLIPPAGE } from "./constants";
-import { TradingConfigService, WeightedTicker } from "./trading-config";
+import { TradingConfigService, WeightedTicker } from "./effect-services";
 import { sendTelegramMessage } from "./util";
 
 class TickerMappingError extends Schema.TaggedError<TickerMappingError>()("TickerMappingError", {
