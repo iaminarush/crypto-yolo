@@ -430,6 +430,8 @@ const program = Effect.gen(function* () {
   const tradingConfig = yield* TradingConfigService;
   const telegram = yield* TelegramService;
 
+  yield* telegram.send("Risex Lambda Started");
+
   const config = yield* tradingConfig.getConfig("risex");
   const weights = yield* tradingConfig.getWeights;
   const markets = risex.markets;
