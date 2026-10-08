@@ -28,6 +28,21 @@ const PortfolioDetailsSchema = Schema.Struct({
   }),
 });
 
+const OrderbookLevelSchema = Schema.Struct({
+  price: Schema.String,
+  quantity: Schema.String,
+});
+
+const OrderbookSchema = Schema.Struct({
+  market_id: Schema.String,
+  bids: Schema.NonEmptyArray(OrderbookLevelSchema),
+  asks: Schema.NonEmptyArray(OrderbookLevelSchema),
+  total_bids: Schema.optional(Schema.String),
+  total_asks: Schema.optional(Schema.String),
+  timestamp: Schema.optional(Schema.String),
+  checksum: Schema.optional(Schema.String),
+});
+
 const ZERO = BigDecimal.fromBigInt(0n);
 const ONE = BigDecimal.fromBigInt(1n);
 const dec = BigDecimal.fromNumberUnsafe;
@@ -55,7 +70,8 @@ const calculateDesiredPositions = (
 
   return volAndWeight.map((vw) => {
     const exchangeTicker = tickerMap.get(vw.ticker);
-    if (!exchangeTicker) throw new Error(`No risex ticker for ${vw.ticker}`);
+    if (!exchangeTicker)
+      throw new RisexError({ message: `No risex ticker for ${vw.ticker}`, cause: tickerMap });
 
     const tokenAllocation = vw.token_allocation;
 
@@ -64,7 +80,8 @@ const calculateDesiredPositions = (
     const oppositeBuffer = dec(isPositive ? -config.trade_buffer : config.trade_buffer);
 
     const market = markets.find((m) => m.market_id === exchangeTicker);
-    if (!market) throw new Error(`No risex market for ${vw.ticker}`);
+    if (!market)
+      throw new RisexError({ message: `No risex market for ${vw.ticker}`, cause: markets });
 
     return {
       rwTicker: vw.ticker,
@@ -207,7 +224,17 @@ const makeRisex = Effect.gen(function* () {
     return yield* Effect.tryPromise({
       try: () => info.getOrderbook(marketId),
       catch: (cause) => new RisexError({ message: "Getting orderbook failed", cause }),
-    });
+    }).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(OrderbookSchema)),
+      Effect.mapError((cause) =>
+        Schema.isSchemaError(cause)
+          ? new RisexError({
+              message: `Orderbook payload invalid for market ${marketId}: ${cause.message}`,
+              cause,
+            })
+          : new RisexError({ message: "Getting orderbook failed", cause }),
+      ),
+    );
   });
 
   const accountLeverage = Effect.fn("Risex.accountLeverage")(function* () {
@@ -251,8 +278,6 @@ const makeRisex = Effect.gen(function* () {
     const attempt = Effect.gen(function* () {
       const book = yield* orderBook(Number(marketId));
       const price = sdec(side === "BUY" ? book.bids[0].price : book.asks[0].price);
-      if (!price)
-        return yield* new RisexError({ message: "No best bid/ask on orderbook", cause: book });
 
       const priceTicks = price.pipe(
         BigDecimal.divideUnsafe(sdec(stepPrice)),
