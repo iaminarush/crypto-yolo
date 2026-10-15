@@ -1,5 +1,5 @@
 import { Handler } from "aws-lambda";
-import { BigDecimal, Clock, Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
+import { BigDecimal, Cause, Clock, Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
 import { TelegramService, TradingConfigService, WeightedTicker } from "./effect-services";
 import { Resource } from "sst";
 import {
@@ -297,7 +297,7 @@ const makeRisex = Effect.gen(function* () {
       }
     });
 
-    const limitOrderRetry = Schedule.forever.pipe(
+    const limitOrderRetry = Schedule.recurs(49).pipe(
       Schedule.addDelay(() => Effect.succeed("2000 millis")),
       Schedule.jittered,
     );
@@ -332,6 +332,11 @@ const makeRisex = Effect.gen(function* () {
           BigDecimal.round({ scale: 0, mode: "to-zero" }),
           BigDecimal.toNumberUnsafe,
         );
+
+        if (!Number.isFinite(sizeSteps) || sizeSteps <= 0) {
+          return { marketId, status: "skipped" as const };
+        }
+
         const book = yield* orderBook(Number(marketId));
         const price =
           side === "BUY"
@@ -467,7 +472,13 @@ const program = Effect.gen(function* () {
         );
 
         if (BigDecimal.isGreaterThan(size, ZERO)) {
-          yield* risex.createLimitOrder({ size, side, marketId, stepPrice, stepSize });
+          yield* risex
+            .createLimitOrder({ size, side, marketId, stepPrice, stepSize })
+            .pipe(
+              Effect.catchTag("RisexError", (e) =>
+                Effect.logWarning(`Limit order failed ${marketId}: ${e.message}`),
+              ),
+            );
         } else {
           tickersToRebalance.delete(marketId);
         }
@@ -495,7 +506,13 @@ const program = Effect.gen(function* () {
         );
 
         if (BigDecimal.isGreaterThan(size, ZERO)) {
-          yield* risex.createLimitOrder({ size, side, marketId, stepPrice, stepSize });
+          yield* risex
+            .createLimitOrder({ size, side, marketId, stepPrice, stepSize })
+            .pipe(
+              Effect.catchTag("RisexError", (e) =>
+                Effect.logWarning(`Limit order failed ${marketId}: ${e.message}`),
+              ),
+            );
         } else {
           tickersToRebalance.delete(marketId);
         }
@@ -578,6 +595,12 @@ const program = Effect.gen(function* () {
   Leverage: ${BigDecimal.format(leverage)}`);
 
   return { finalPositions, tickersOutOfBuffer };
-});
+}).pipe(
+  Effect.tapCause((cause) =>
+    TelegramService.use((telegram) =>
+      telegram.send(`Risex Trading Failed\n${Cause.pretty(cause)}`),
+    ).pipe(Effect.ignore),
+  ),
+);
 
 export const handler: Handler = () => Effect.runPromise(program.pipe(Effect.provide(AppLayer)));
