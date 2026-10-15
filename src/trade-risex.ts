@@ -1,5 +1,15 @@
 import { Handler } from "aws-lambda";
-import { BigDecimal, Cause, Clock, Context, Duration, Effect, Layer, Schedule, Schema } from "effect";
+import {
+  BigDecimal,
+  Cause,
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Schedule,
+  Schema,
+} from "effect";
 import { TelegramService, TradingConfigService, WeightedTicker } from "./effect-services";
 import { Resource } from "sst";
 import {
@@ -356,7 +366,7 @@ const makeRisex = Effect.gen(function* () {
           priceTicks,
         });
 
-        return { ...result, status: "ok" as const };
+        return { ...result, status: "ok" as const, marketId };
       }),
     );
 
