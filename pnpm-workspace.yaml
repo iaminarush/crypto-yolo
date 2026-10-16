@@ -6,6 +6,7 @@ allowBuilds:
   ccxt: true
   esbuild: true
   msgpackr-extract: true
+  protobufjs: true
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - better-result@3.0.0
