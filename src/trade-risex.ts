@@ -307,7 +307,7 @@ const makeRisex = Effect.gen(function* () {
       }
     });
 
-    const limitOrderRetry = Schedule.recurs(49).pipe(
+    const limitOrderRetry = Schedule.recurs(19).pipe(
       Schedule.addDelay(() => Effect.succeed("2000 millis")),
       Schedule.jittered,
     );

@@ -5,11 +5,8 @@ import {
   ExchangeClient,
   HttpTransport,
   InfoClient,
-  type L2BookResponse,
   type MetaResponse,
   type OpenOrdersResponse,
-  type OrderSuccessResponse,
-  type SpotClearinghouseStateResponse,
 } from "@nktkas/hyperliquid";
 import { formatPrice, SymbolConverter } from "@nktkas/hyperliquid/utils";
 import type { Handler } from "aws-lambda";
@@ -65,252 +62,221 @@ const promiseRetry = Schedule.exponential("200 millis").pipe(
   Schedule.upTo({ times: 4 }),
 );
 
-class HyperliquidService extends Context.Service<
-  HyperliquidService,
-  {
-    readonly clearinghouseState: Effect.Effect<ClearinghouseStateResponse, HyperliquidError>;
-    readonly spotClearinghouseState: Effect.Effect<
-      SpotClearinghouseStateResponse,
-      HyperliquidError
-    >;
-    readonly meta: Effect.Effect<MetaResponse, HyperliquidError>;
-    readonly allMids: Effect.Effect<AllMidsResponse, HyperliquidError>;
-    readonly l2Book: (coin: string) => Effect.Effect<L2BookResponse, HyperliquidError>;
-    readonly openOrders: Effect.Effect<OpenOrdersResponse, HyperliquidError>;
+const makeHyperliquidService = Effect.gen(function* () {
+  const WALLET = Resource.HYPERLIQUID_WALLET.value as Hex;
+  const transport = new HttpTransport();
+  const client = new InfoClient({ transport });
+  const wallet = yield* Effect.try({
+    try: () => privateKeyToAccount(Resource.HYPERLIQUID_KEY.value as Hex),
+    catch: (cause) =>
+      new HyperliquidError({
+        message: "Walllet initialization failed",
+        cause,
+      }),
+  });
 
-    createLimitOrder(args: {
-      ticker: string;
-      size: BigDecimal.BigDecimal;
-      side: "BUY" | "SELL";
-    }): Effect.Effect<
-      OrderSuccessResponse | { status: "skipped"; reason: string },
-      HyperliquidError | OrderError
-    >;
-    marketOrderRebalance(args: { desiredPositions: TDesiredPosition[] }): Effect.Effect<
-      {
-        ordered: Array<OrderSuccessResponse & { ticker: string }>;
-        skipped: { status: "skipped"; ticker: string }[];
-        failed: HyperliquidError[];
-      },
-      HyperliquidError
-    >;
-    cancelOrders: (orders: OpenOrdersResponse) => Effect.Effect<void, HyperliquidError, never>;
-  }
->()("HyperliquidService") {
-  static readonly layer = Layer.effect(
-    HyperliquidService,
-    Effect.gen(function* () {
-      const WALLET = Resource.HYPERLIQUID_WALLET.value as Hex;
-      const transport = new HttpTransport();
-      const client = new InfoClient({ transport });
-      const wallet = yield* Effect.try({
-        try: () => privateKeyToAccount(Resource.HYPERLIQUID_KEY.value as Hex),
-        catch: (cause) =>
-          new HyperliquidError({
-            message: "Walllet initialization failed",
-            cause,
-          }),
-      });
+  const converter = yield* Effect.tryPromise({
+    try: () => SymbolConverter.create({ transport }),
+    catch: (cause) =>
+      new HyperliquidError({
+        message: "SymbolConverter initialization failed",
+        cause,
+      }),
+  }).pipe(Effect.retry(promiseRetry));
 
-      const converter = yield* Effect.tryPromise({
-        try: () => SymbolConverter.create({ transport }),
-        catch: (cause) =>
-          new HyperliquidError({
-            message: "SymbolConverter initialization failed",
-            cause,
-          }),
-      }).pipe(Effect.retry(promiseRetry));
+  const exchange = new ExchangeClient({ transport, wallet });
 
-      const exchange = new ExchangeClient({ transport, wallet });
+  const clearinghouseState = Effect.tryPromise({
+    try: () => client.clearinghouseState({ user: WALLET }),
+    catch: (cause) =>
+      new HyperliquidError({
+        message: "Retreiving Perp Positions Failed",
+        cause,
+      }),
+  }).pipe(Effect.retry(promiseRetry));
 
-      const clearinghouseState = Effect.tryPromise({
-        try: () => client.clearinghouseState({ user: WALLET }),
-        catch: (cause) =>
-          new HyperliquidError({
-            message: "Retreiving Perp Positions Failed",
-            cause,
-          }),
-      }).pipe(Effect.retry(promiseRetry));
+  const spotClearinghouseState = Effect.tryPromise({
+    try: () => client.spotClearinghouseState({ user: WALLET }),
+    catch: (cause) =>
+      new HyperliquidError({
+        message: "Retreiving Spot Positions Failed",
+        cause,
+      }),
+  }).pipe(Effect.retry(promiseRetry));
 
-      const spotClearinghouseState = Effect.tryPromise({
-        try: () => client.spotClearinghouseState({ user: WALLET }),
-        catch: (cause) =>
-          new HyperliquidError({
-            message: "Retreiving Spot Positions Failed",
-            cause,
-          }),
-      }).pipe(Effect.retry(promiseRetry));
+  const meta = Effect.tryPromise({
+    try: () => client.meta(),
+    catch: (cause) => new HyperliquidError({ message: "Retreiving Meta Failed", cause }),
+  }).pipe(Effect.retry(promiseRetry));
 
-      const meta = Effect.tryPromise({
-        try: () => client.meta(),
-        catch: (cause) => new HyperliquidError({ message: "Retreiving Meta Failed", cause }),
-      }).pipe(Effect.retry(promiseRetry));
+  const allMids = Effect.tryPromise({
+    try: () => client.allMids(),
+    catch: (cause) => new HyperliquidError({ message: "allMids failed", cause }),
+  }).pipe(Effect.retry(promiseRetry));
 
-      const allMids = Effect.tryPromise({
-        try: () => client.allMids(),
-        catch: (cause) => new HyperliquidError({ message: "allMids failed", cause }),
-      }).pipe(Effect.retry(promiseRetry));
+  const l2Book = Effect.fn("HyperliquidService.l2Book")(function* (coin: string) {
+    return yield* Effect.tryPromise({
+      try: () => client.l2Book({ coin }),
+      catch: (cause) =>
+        new HyperliquidError({
+          message: "Retreiving l2Book failed",
+          cause,
+        }),
+    }).pipe(Effect.retry(promiseRetry));
+  });
 
-      const l2Book = Effect.fn("HyperliquidService.l2Book")(function* (coin: string) {
-        return yield* Effect.tryPromise({
-          try: () => client.l2Book({ coin }),
-          catch: (cause) =>
-            new HyperliquidError({
-              message: "Retreiving l2Book failed",
-              cause,
-            }),
-        }).pipe(Effect.retry(promiseRetry));
-      });
+  const openOrders = Effect.tryPromise({
+    try: () => client.openOrders({ user: WALLET }),
+    catch: (cause) =>
+      new HyperliquidError({
+        message: "Retreiving Open Orders failed",
+        cause,
+      }),
+  }).pipe(Effect.retry(promiseRetry));
 
-      const openOrders = Effect.tryPromise({
-        try: () => client.openOrders({ user: WALLET }),
-        catch: (cause) =>
-          new HyperliquidError({
-            message: "Retreiving Open Orders failed",
-            cause,
-          }),
-      }).pipe(Effect.retry(promiseRetry));
+  const createLimitOrder = Effect.fn("Hyperliquid.createLimitOrder")(function* ({
+    ticker,
+    size,
+    side,
+  }: {
+    ticker: string;
+    size: BigDecimal.BigDecimal;
+    side: "BUY" | "SELL";
+  }) {
+    const isBuy = side === "BUY";
+    const assetId = converter.getAssetId(ticker);
+    const szDecimals = converter.getSzDecimals(ticker);
 
-      const createLimitOrder = Effect.fn("Hyperliquid.createLimitOrder")(function* ({
-        ticker,
-        size,
-        side,
-      }: {
-        ticker: string;
-        size: BigDecimal.BigDecimal;
-        side: "BUY" | "SELL";
-      }) {
-        const isBuy = side === "BUY";
-        const assetId = converter.getAssetId(ticker);
-        const szDecimals = converter.getSzDecimals(ticker);
+    if (assetId === undefined || szDecimals === undefined)
+      return {
+        status: "skipped",
+        reason: "AssetId or szDecimals not found",
+      } as const;
 
-        if (assetId === undefined || szDecimals === undefined)
-          return {
-            status: "skipped",
-            reason: "AssetId or szDecimals not found",
-          } as const;
-
-        const attempt = Effect.gen(function* () {
-          const book = yield* l2Book(ticker);
-          const price = book?.levels[isBuy ? 0 : 1]?.[0]?.px;
-          if (!price) {
-            return {
-              status: "skipped",
-              reason: "No bid/ask price found",
-            } as const;
-          }
-
-          return yield* Effect.tryPromise({
-            try: () =>
-              exchange.order({
-                orders: [
-                  {
-                    a: assetId,
-                    b: isBuy,
-                    p: formatPrice(price, szDecimals),
-                    s: BigDecimal.toNumberUnsafe(size),
-                    r: false,
-                    t: { limit: { tif: "Alo" } },
-                  },
-                ],
-              }),
-            catch: (cause) =>
-              new OrderError({
-                ticker,
-                message: "Order placement failed",
-                cause,
-              }),
-          });
-        });
-
-        const limitOrderRetry = Schedule.forever.pipe(
-          Schedule.addDelay(() => Effect.succeed("2000 millis")),
-          Schedule.jittered,
-        );
-
-        return yield* attempt.pipe(Effect.retry(limitOrderRetry));
-      });
-
-      const marketOrderRebalance = Effect.fn("Hyperliquid.marketOrderRebalance")(function* ({
-        desiredPositions,
-      }: {
-        desiredPositions: TDesiredPosition[];
-      }) {
-        const { assetPositions: currentPositions } = yield* clearinghouseState;
-
-        const tickersToMarketOrder = [
-          ...filterTickersToRebalance(desiredPositions, currentPositions).values(),
-        ];
-
-        const [failed, ordered] = yield* Effect.partition(tickersToMarketOrder, (desiredPosition) =>
-          Effect.gen(function* () {
-            const ticker = desiredPosition.exchangeTicker;
-            const mids = yield* allMids;
-            const currentPosition = currentPositions.find((p) => p.position.coin === ticker);
-            const { size, side } = calculateOrderSize(
-              desiredPosition,
-              BigDecimal.fromStringUnsafe(currentPosition ? currentPosition.position.szi : "0"),
-              mids,
-            );
-            if (!BigDecimal.isGreaterThan(size, ZERO))
-              return { ticker, status: "skipped" as const };
-            const mid = mids[ticker];
-            const price = parseFloat(mid) * (1 + (side === "BUY" ? SLIPPAGE : -SLIPPAGE));
-            const response = yield* Effect.tryPromise({
-              try: () =>
-                exchange.order({
-                  orders: [
-                    {
-                      a: converter.getAssetId(ticker) || "",
-                      b: side === "BUY",
-                      p: formatPrice(price, converter.getSzDecimals(ticker) || 0),
-                      s: BigDecimal.toNumberUnsafe(size),
-                      r: false,
-                      t: { limit: { tif: "Ioc" } },
-                    },
-                  ],
-                }),
-              catch: (cause) =>
-                new HyperliquidError({ message: `Market order failed for ${ticker}`, cause }),
-            });
-            return { ...response, ticker };
-          }),
-        );
+    const attempt = Effect.gen(function* () {
+      const book = yield* l2Book(ticker);
+      const price = book?.levels[isBuy ? 0 : 1]?.[0]?.px;
+      if (!price) {
         return {
-          failed,
-          ordered: ordered.filter((o) => o.status !== "skipped"),
-          skipped: ordered.filter((o) => o.status === "skipped"),
-        };
+          status: "skipped",
+          reason: "No bid/ask price found",
+        } as const;
+      }
+
+      return yield* Effect.tryPromise({
+        try: () =>
+          exchange.order({
+            orders: [
+              {
+                a: assetId,
+                b: isBuy,
+                p: formatPrice(price, szDecimals),
+                s: BigDecimal.toNumberUnsafe(size),
+                r: false,
+                t: { limit: { tif: "Alo" } },
+              },
+            ],
+          }),
+        catch: (cause) =>
+          new OrderError({
+            ticker,
+            message: "Order placement failed",
+            cause,
+          }),
       });
+    });
 
-      const cancelOrders = Effect.fn("HyperliquidService.cancelOrders")(function* (
-        orders: OpenOrdersResponse,
-      ) {
-        const cancels = orders.map((o) => ({ a: converter.getAssetId(o.coin) || "", o: o.oid }));
+    const limitOrderRetry = Schedule.recurs(19).pipe(
+      Schedule.addDelay(() => Effect.succeed("2000 millis")),
+      Schedule.jittered,
+    );
 
-        yield* Effect.tryPromise({
+    return yield* attempt.pipe(Effect.retry(limitOrderRetry));
+  });
+
+  const marketOrderRebalance = Effect.fn("Hyperliquid.marketOrderRebalance")(function* ({
+    desiredPositions,
+  }: {
+    desiredPositions: TDesiredPosition[];
+  }) {
+    const { assetPositions: currentPositions } = yield* clearinghouseState;
+
+    const tickersToMarketOrder = [
+      ...filterTickersToRebalance(desiredPositions, currentPositions).values(),
+    ];
+
+    const [failed, ordered] = yield* Effect.partition(tickersToMarketOrder, (desiredPosition) =>
+      Effect.gen(function* () {
+        const ticker = desiredPosition.exchangeTicker;
+        const mids = yield* allMids;
+        const currentPosition = currentPositions.find((p) => p.position.coin === ticker);
+        const { size, side } = calculateOrderSize(
+          desiredPosition,
+          BigDecimal.fromStringUnsafe(currentPosition ? currentPosition.position.szi : "0"),
+          mids,
+        );
+        if (!BigDecimal.isGreaterThan(size, ZERO)) return { ticker, status: "skipped" as const };
+        const mid = mids[ticker];
+        const price = parseFloat(mid) * (1 + (side === "BUY" ? SLIPPAGE : -SLIPPAGE));
+        const response = yield* Effect.tryPromise({
           try: () =>
-            exchange.cancel({ cancels }).catch((cause) => {
-              if (cause instanceof ApiRequestError) return;
-              throw cause;
+            exchange.order({
+              orders: [
+                {
+                  a: converter.getAssetId(ticker) || "",
+                  b: side === "BUY",
+                  p: formatPrice(price, converter.getSzDecimals(ticker) || 0),
+                  s: BigDecimal.toNumberUnsafe(size),
+                  r: false,
+                  t: { limit: { tif: "Ioc" } },
+                },
+              ],
             }),
-          catch: (cause) => new HyperliquidError({ message: "Cancel request failed", cause }),
+          catch: (cause) =>
+            new HyperliquidError({ message: `Market order failed for ${ticker}`, cause }),
         });
-      });
+        return { ...response, ticker };
+      }),
+    );
+    return {
+      failed,
+      ordered: ordered.filter((o) => o.status !== "skipped"),
+      skipped: ordered.filter((o) => o.status === "skipped"),
+    };
+  });
 
-      return HyperliquidService.of({
-        clearinghouseState,
-        spotClearinghouseState,
-        meta,
-        allMids,
-        l2Book,
-        openOrders,
-        createLimitOrder,
-        marketOrderRebalance,
-        cancelOrders,
-      });
-    }),
-  );
+  const cancelOrders = Effect.fn("HyperliquidService.cancelOrders")(function* (
+    orders: OpenOrdersResponse,
+  ) {
+    const cancels = orders.map((o) => ({ a: converter.getAssetId(o.coin) || "", o: o.oid }));
+
+    yield* Effect.tryPromise({
+      try: () =>
+        exchange.cancel({ cancels }).catch((cause) => {
+          if (cause instanceof ApiRequestError) return;
+          throw cause;
+        }),
+      catch: (cause) => new HyperliquidError({ message: "Cancel request failed", cause }),
+    });
+  });
+
+  return {
+    clearinghouseState,
+    spotClearinghouseState,
+    meta,
+    allMids,
+    l2Book,
+    openOrders,
+    createLimitOrder,
+    marketOrderRebalance,
+    cancelOrders,
+  };
+});
+
+class HyperliquidService extends Context.Service<HyperliquidService>()("HyperliquidService", {
+  make: makeHyperliquidService,
+}) {
+  static readonly layer = Layer.effect(HyperliquidService, HyperliquidService.make);
 }
 
 class TelegramService extends Context.Service<
@@ -524,7 +490,13 @@ const program = Effect.gen(function* () {
         );
 
         if (BigDecimal.isGreaterThan(size, ZERO)) {
-          yield* hl.createLimitOrder({ ticker, size, side });
+          yield* hl.createLimitOrder({ ticker, size, side }).pipe(
+            Effect.catchTags({
+              OrderError: (e) => Effect.logWarning(`Limit order failed ${ticker}: ${e.message}`),
+              HyperliquidError: (e) =>
+                Effect.logWarning(`Book fetch failed ${ticker}: ${e.message}`),
+            }),
+          );
         } else {
           tickersToRebalance.delete(ticker);
         }
@@ -552,11 +524,19 @@ const program = Effect.gen(function* () {
         );
 
         if (BigDecimal.isGreaterThan(size, ZERO)) {
-          yield* hl.createLimitOrder({
-            ticker,
-            size,
-            side,
-          });
+          yield* hl
+            .createLimitOrder({
+              ticker,
+              size,
+              side,
+            })
+            .pipe(
+              Effect.catchTags({
+                OrderError: (e) => Effect.logWarning(`Limit order failed ${ticker}: ${e.message}`),
+                HyperliquidError: (e) =>
+                  Effect.logWarning(`Book fetch failed ${ticker}: ${e.message}`),
+              }),
+            );
         } else {
           tickersToRebalance.delete(ticker);
         }
