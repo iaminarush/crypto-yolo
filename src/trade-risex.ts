@@ -366,7 +366,12 @@ const makeRisex = Effect.gen(function* () {
           priceTicks,
         });
 
-        return { ...result, status: "ok" as const, marketId };
+        return {
+          ...result,
+          status: "ok" as const,
+          marketId,
+          rwTicker: desiredPosition.rwTicker,
+        };
       }),
     );
 
@@ -584,7 +589,7 @@ const program = Effect.gen(function* () {
       : failed.length > 0
         ? "Incomplete"
         : `${ordered.length} taker orders`;
-  const marketedList = ordered.length > 0 ? ordered.map((o) => o.marketId).join(", ") : "None";
+  const marketedList = ordered.length > 0 ? ordered.map((o) => o.rwTicker).join(", ") : "None";
   const outOfBoundsList =
     tickersOutOfBuffer.length > 0
       ? tickersOutOfBuffer.map((t) => `${t.rwTicker} $${t.priceGap.toFixed(2)}`).join(", ")
