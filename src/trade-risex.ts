@@ -366,12 +366,7 @@ const makeRisex = Effect.gen(function* () {
           priceTicks,
         });
 
-        return {
-          ...result,
-          status: "ok" as const,
-          marketId,
-          rwTicker: desiredPosition.rwTicker,
-        };
+        return { ...result, status: "ok" as const, rwTicker: desiredPosition.rwTicker };
       }),
     );
 
