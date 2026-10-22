@@ -512,7 +512,7 @@ const program = Effect.gen(function* () {
         const updatedPosition = positionsAfterCancel.find((p) => p.market_id === marketId);
         const { size, side } = calculateOrderSize(
           desiredPosition,
-          updatedPosition ? sdec(updatedPosition.size) : ZERO,
+          updatedPosition ? sdec(formatWad(updatedPosition.size)) : ZERO,
         );
 
         if (BigDecimal.isGreaterThan(size, ZERO)) {
@@ -561,7 +561,7 @@ const program = Effect.gen(function* () {
       Effect.gen(function* () {
         const position = finalPositions.find((fp) => fp.market_id === fr.exchangeTicker);
 
-        const size = position?.size ? sdec(position.size) : ZERO;
+        const size = position ? sdec(formatWad(position.size)) : ZERO;
         const book = yield* risex.orderBook(Number(fr.exchangeTicker));
         const midPrice = (Number(book.bids[0].price) + Number(book.asks[0].price)) / 2;
 
