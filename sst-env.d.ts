@@ -6,18 +6,6 @@
 
 declare module "sst" {
   export interface Resource {
-    "EXTENDED_API_KEY": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "EXTENDED_LAMBDA_KEY": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "EXTENDED_STARKEX_KEY": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
     "FailureTopic": {
       "arn": string
       "type": "sst.aws.SnsTopic"
@@ -64,10 +52,6 @@ declare module "sst" {
       "url": string
     }
     "notifier": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "tradeExtended": {
       "name": string
       "type": "sst.aws.Function"
     }
