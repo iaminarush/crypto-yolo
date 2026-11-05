@@ -47,11 +47,7 @@ const getVolatilities = async () => {
 };
 
 const getStoredTimestamp = async () => {
-  const { data } = await supabase
-    .from("timestamp")
-    .select("*")
-    .eq("id", TIMESTAMP_ID)
-    .single();
+  const { data } = await supabase.from("timestamp").select("*").eq("id", TIMESTAMP_ID).single();
 
   if (!data) {
     const result = await supabase
@@ -72,22 +68,12 @@ const getStoredTimestamp = async () => {
 
 const getToday9AMUTC = () => {
   const now = new Date();
-  const today9AM = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-    9,
-    0,
-    0,
-  );
+  const today9AM = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 9, 0, 0);
   return Math.floor(today9AM / 1000);
 };
 
 const updateLastTriggered = async (timestamp: number) => {
-  await supabase
-    .from("timestamp")
-    .upsert({ id: TIMESTAMP_ID, timestamp })
-    .eq("id", TIMESTAMP_ID);
+  await supabase.from("timestamp").upsert({ id: TIMESTAMP_ID, timestamp }).eq("id", TIMESTAMP_ID);
 };
 
 export const handler = async () => {
@@ -105,19 +91,18 @@ export const handler = async () => {
   const weightsUpdatedToday = weightsTimestamp >= today9AM;
   const volUpdatedToday = volatilitiesTimestamp >= today9AM;
 
-  const shouldTrigger =
-    notTriggeredToday && weightsUpdatedToday && volUpdatedToday;
+  const shouldTrigger = notTriggeredToday && weightsUpdatedToday && volUpdatedToday;
 
   console.log(notTriggeredToday, weightsUpdatedToday, volUpdatedToday);
 
   if (shouldTrigger) {
     const client = new LambdaClient({ region: "ap-northeast-1" });
-    await client.send(
-      new InvokeCommand({
-        FunctionName: Resource.tradeExtended.name,
-        InvocationType: "Event",
-      }),
-    );
+    // await client.send(
+    //   new InvokeCommand({
+    //     FunctionName: Resource.tradeExtended.name,
+    //     InvocationType: "Event",
+    //   }),
+    // );
     await client.send(
       new InvokeCommand({
         FunctionName: Resource.tradeHyperliquid.name,
